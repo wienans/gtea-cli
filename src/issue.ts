@@ -138,7 +138,7 @@ function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: Cli
       };
     }
 
-    if (jsonFlag.handled && jsonFlag.value !== undefined) {
+    if (jsonFlag.handled) {
       flags.jsonFields = (jsonFlag.value ?? "")
         .split(",")
         .map((field) => field.trim())
