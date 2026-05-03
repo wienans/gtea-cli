@@ -72,6 +72,33 @@
         ]
       }
     ],
+    "issueCreateOptions": [
+      {
+        "name": "--title",
+        "summary": "Supply the issue title",
+        "status": "supported"
+      },
+      {
+        "name": "--body",
+        "summary": "Supply the issue body",
+        "status": "supported"
+      }
+    ],
+    "issueCreateUnsupportedOptions": [
+      {
+        "name": "--recover",
+        "summary": "Recover a saved issue draft",
+        "status": "unsupported",
+        "reason": "Draft recovery is not part of the supported issue maintenance slice."
+      }
+    ],
+    "issueCommentOptions": [
+      {
+        "name": "--body",
+        "summary": "Supply the comment body",
+        "status": "supported"
+      }
+    ],
     "browseOptions": [
       {
         "name": "--repo",
@@ -372,50 +399,49 @@
           "kind": "command",
           "name": "create",
           "summary": "Create an issue",
-          "status": "unsupported",
-          "reason": "Pending the issue maintenance slice (#6).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "issueRepositoryTarget",
+            "issueCreateOptions",
+            "issueCreateUnsupportedOptions"
           ]
         },
         {
           "kind": "command",
           "name": "comment",
           "summary": "Add a comment to an issue",
-          "status": "unsupported",
-          "reason": "Pending the issue maintenance slice (#6).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "issueRepositoryTarget",
+            "issueCommentOptions"
           ]
         },
         {
           "kind": "command",
           "name": "edit",
           "summary": "Edit an issue",
-          "status": "unsupported",
-          "reason": "Pending the issue maintenance slice (#6).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "issueRepositoryTarget",
+            "issueCreateOptions"
           ]
         },
         {
           "kind": "command",
           "name": "close",
           "summary": "Close an issue",
-          "status": "unsupported",
-          "reason": "Pending the issue maintenance slice (#6).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "issueRepositoryTarget"
           ]
         },
         {
           "kind": "command",
           "name": "reopen",
           "summary": "Reopen an issue",
-          "status": "unsupported",
-          "reason": "Pending the issue maintenance slice (#6).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "issueRepositoryTarget"
           ]
         }
       ]
