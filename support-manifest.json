@@ -56,21 +56,21 @@
       {
         "name": "--hostname",
         "summary": "Select the target Gitea Host",
-        "status": "unsupported"
+        "status": "supported"
       }
     ],
     "authTokenInput": [
       {
         "name": "--with-token",
         "summary": "Read a Personal Access Token from standard input",
-        "status": "unsupported"
+        "status": "supported"
       }
     ],
     "authStatusOptions": [
       {
         "name": "--show-token",
         "summary": "Include token details in status output",
-        "status": "unsupported"
+        "status": "supported"
       }
     ]
   },
@@ -190,8 +190,7 @@
           "kind": "command",
           "name": "login",
           "summary": "Authenticate with a Gitea Host",
-          "status": "unsupported",
-          "reason": "Pending the multi-host auth slice (#3).",
+          "status": "supported",
           "flagProfiles": [
             "authHost",
             "authTokenInput"
@@ -201,8 +200,7 @@
           "kind": "command",
           "name": "status",
           "summary": "Show the active host credential",
-          "status": "unsupported",
-          "reason": "Pending the multi-host auth slice (#3).",
+          "status": "supported",
           "flagProfiles": [
             "authHost",
             "authStatusOptions"
@@ -212,8 +210,7 @@
           "kind": "command",
           "name": "token",
           "summary": "Print the active token",
-          "status": "unsupported",
-          "reason": "Pending the multi-host auth slice (#3).",
+          "status": "supported",
           "flagProfiles": [
             "authHost"
           ]
@@ -222,8 +219,7 @@
           "kind": "command",
           "name": "switch",
           "summary": "Switch the active Gitea Host",
-          "status": "unsupported",
-          "reason": "Pending the multi-host auth slice (#3).",
+          "status": "supported",
           "flagProfiles": [
             "authHost"
           ]
@@ -232,8 +228,7 @@
           "kind": "command",
           "name": "logout",
           "summary": "Remove the active host credential",
-          "status": "unsupported",
-          "reason": "Pending the multi-host auth slice (#3).",
+          "status": "supported",
           "flagProfiles": [
             "authHost"
           ]
@@ -242,18 +237,17 @@
           "kind": "command",
           "name": "refresh",
           "summary": "Refresh the active host credential",
-          "status": "unsupported",
-          "reason": "Pending the multi-host auth slice (#3).",
+          "status": "supported",
           "flagProfiles": [
-            "authHost"
+            "authHost",
+            "authTokenInput"
           ]
         },
         {
           "kind": "command",
           "name": "setup-git",
           "summary": "Configure Git to use the active credential",
-          "status": "unsupported",
-          "reason": "Pending the multi-host auth slice (#3).",
+          "status": "supported",
           "flagProfiles": [
             "authHost"
           ]

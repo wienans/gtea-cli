@@ -1,10 +1,8 @@
+import { executeAuthCommand } from "./auth.js";
+import { CliExecutionContext, CliResult, resolveCliExecutionContext } from "./cli-runtime.js";
 import { ManifestCommand, ManifestGroup, ManifestNode, supportManifest } from "./support-manifest.js";
 
-export interface CliResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
+export type { CliExecutionContext, CliResult } from "./cli-runtime.js";
 
 function formatStatus(status: ManifestNode["status"]): string {
   return `[${status}]`;
@@ -166,8 +164,17 @@ function renderUnsupported(path: string[], command: ManifestCommand): CliResult 
   };
 }
 
-export function executeCli(args: string[]): CliResult {
+export function executeCli(args: string[], context: CliExecutionContext = {}): CliResult {
+  const executionContext = resolveCliExecutionContext(context);
   const wantsHelp = args.includes("--help") || args.includes("-h");
+
+  if (!wantsHelp) {
+    const authResult = executeAuthCommand(args, executionContext);
+
+    if (authResult !== undefined) {
+      return authResult;
+    }
+  }
 
   if (args.length === 0 || wantsHelp) {
     const { node, path } = resolveNode(args.filter((arg) => arg !== "--help" && arg !== "-h"));
