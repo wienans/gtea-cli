@@ -41,7 +41,6 @@ interface IssueRecord {
 }
 
 interface IssueCommentRecord {
-  id: number;
   body: string;
   authorLogin?: string;
 }
@@ -565,13 +564,11 @@ async function readIssueComments(
     }
 
     const payload = await response.json() as GiteaIssueCommentPayload[];
-    const comments = payload.map((comment, index) => {
-      const id = typeof comment.id === "number" ? comment.id : index + 1;
+    const comments = payload.map((comment) => {
       const body = typeof comment.body === "string" ? comment.body : "";
       const authorLogin = typeof comment.user?.login === "string" ? comment.user.login : undefined;
 
       return {
-        id,
         body,
         ...(authorLogin === undefined ? {} : { authorLogin })
       };
@@ -993,11 +990,7 @@ function renderIssue(issue: IssueRecord, options?: { showAllComments?: boolean }
         );
       }
     } else {
-      const newestComment = issue.comments[issue.comments.length - 1];
-
-      if (newestComment === undefined) {
-        return `${lines.join("\n")}\n`;
-      }
+      const newestComment = issue.comments[issue.comments.length - 1]!;
 
       const hiddenCommentCount = Math.max((issue.commentCount ?? issue.comments.length) - 1, 0);
 
