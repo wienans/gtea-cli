@@ -7,16 +7,15 @@
     "gtea": "dist/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "bunx tsc -p tsconfig.json",
     "build:binary": "bun build --compile src/main.ts --outfile dist/bin/gtea",
     "build:binaries": "bun run scripts/build-binaries.ts",
-    "cli": "tsx src/main.ts",
-    "test": "tsx --test tests/*.test.ts",
-    "typecheck": "tsc -p tsconfig.test.json"
+    "cli": "bun run src/main.ts",
+    "test": "bun test tests/*.test.ts",
+    "typecheck": "bunx tsc -p tsconfig.test.json"
   },
   "devDependencies": {
     "@types/node": "^22.15.31",
-    "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }
 }
