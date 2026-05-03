@@ -41,13 +41,8 @@ Explore the repo and fill your context window with relevant information that wil
 Pay extra attention to test files that touch the relevant parts of the code.
 
 # EXECUTION
-If applicable, use tdd skill to implement the task.
+Use the tdd skill with Red-Green-Refactor cycle to implement the task.
 
-RED: write one test
-GREEN: write the implementation to pass that test
-REPEAT until done
-REFACTOR the code
-FEEDBACK LOOPS
 Before committing, typecheck and tests to ensure the tests pass.
 
 # COMMIT
