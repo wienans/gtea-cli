@@ -14,6 +14,19 @@ interface ParsedIssueFlags {
   template?: string;
 }
 
+interface ParsedIssueCreateFlags {
+  repository?: string;
+  title?: string;
+  body?: string;
+}
+
+interface ParsedIssueMutationFlags {
+  issueNumber?: number;
+  repository?: string;
+  title?: string;
+  body?: string;
+}
+
 interface IssueRecord {
   number: number;
   title: string;
@@ -37,6 +50,14 @@ const issueViewCommand = issueGroup?.children.find(
   (node): node is ManifestCommand => node.kind === "command" && node.name === "view"
 );
 const issueOutputFields = new Set((issueViewCommand?.outputFields ?? []).map((field) => field.name));
+
+function renderUnsupportedIssueFlag(subcommand: string, flag: string, reason: string): CliResult {
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr: `${supportManifest.cliName} issue ${subcommand} flag ${flag} is currently unsupported: ${reason}\n`
+  };
+}
 
 function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: CliResult } {
   const flags: ParsedIssueFlags = {};
@@ -190,6 +211,247 @@ function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: Cli
   return { flags };
 }
 
+function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags; error?: CliResult } {
+  const flags: ParsedIssueCreateFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    if (token === "--repo" || token === "-R") {
+      const rawRepository = args[index + 1];
+
+      if (rawRepository === undefined || rawRepository.startsWith("-")) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Missing value for --repo.\n"
+          }
+        };
+      }
+
+      flags.repository = rawRepository;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--repo=")) {
+      flags.repository = token.slice("--repo=".length);
+      continue;
+    }
+
+    if (token === "--recover" || token.startsWith("--recover=")) {
+      return {
+        flags,
+        error: renderUnsupportedIssueFlag(
+          "create",
+          "--recover",
+          "Draft recovery is not part of the supported issue maintenance slice."
+        )
+      };
+    }
+
+    if (token === "--title") {
+      const rawTitle = args[index + 1];
+
+      if (rawTitle === undefined || rawTitle.startsWith("-")) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Missing value for --title.\n"
+          }
+        };
+      }
+
+      flags.title = rawTitle;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--title=")) {
+      flags.title = token.slice("--title=".length);
+      continue;
+    }
+
+    if (token === "--body") {
+      const rawBody = args[index + 1];
+
+      if (rawBody === undefined || rawBody.startsWith("-")) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Missing value for --body.\n"
+          }
+        };
+      }
+
+      flags.body = rawBody;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--body=")) {
+      flags.body = token.slice("--body=".length);
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    return {
+      flags,
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Unexpected argument: ${token}\n`
+      }
+    };
+  }
+
+  return { flags };
+}
+
+function parseIssueMutationFlags(
+  args: string[],
+  options: { allowTitle: boolean; allowBody: boolean }
+): { flags: ParsedIssueMutationFlags; error?: CliResult } {
+  const flags: ParsedIssueMutationFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    if (token === "--repo" || token === "-R") {
+      const rawRepository = args[index + 1];
+
+      if (rawRepository === undefined || rawRepository.startsWith("-")) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Missing value for --repo.\n"
+          }
+        };
+      }
+
+      flags.repository = rawRepository;
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--repo=")) {
+      flags.repository = token.slice("--repo=".length);
+      continue;
+    }
+
+    if (options.allowTitle && token === "--title") {
+      const rawTitle = args[index + 1];
+
+      if (rawTitle === undefined || rawTitle.startsWith("-")) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Missing value for --title.\n"
+          }
+        };
+      }
+
+      flags.title = rawTitle;
+      index += 1;
+      continue;
+    }
+
+    if (options.allowTitle && token.startsWith("--title=")) {
+      flags.title = token.slice("--title=".length);
+      continue;
+    }
+
+    if (options.allowBody && token === "--body") {
+      const rawBody = args[index + 1];
+
+      if (rawBody === undefined || rawBody.startsWith("-")) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Missing value for --body.\n"
+          }
+        };
+      }
+
+      flags.body = rawBody;
+      index += 1;
+      continue;
+    }
+
+    if (options.allowBody && token.startsWith("--body=")) {
+      flags.body = token.slice("--body=".length);
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    if (flags.issueNumber !== undefined) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unexpected argument: ${token}\n`
+        }
+      };
+    }
+
+    if (!/^\d+$/.test(token)) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Invalid issue number: ${token}\n`
+        }
+      };
+    }
+
+    flags.issueNumber = Number.parseInt(token, 10);
+  }
+
+  return { flags };
+}
+
 function buildIssueUrl(repository: RepositoryContext, issueNumber: number): string {
   return `${buildHostBaseUrl(repository.hostname)}/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}`;
 }
@@ -250,6 +512,276 @@ async function readIssue(
         exitCode: 1,
         stdout: "",
         stderr: `Failed to read issue #${issueNumber} from ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function readGiteaErrorMessage(response: Response): Promise<string | undefined> {
+  try {
+    const payload = await response.json() as { message?: string };
+
+    return typeof payload.message === "string" && payload.message.length > 0 ? payload.message : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function createIssue(
+  repository: RepositoryContext,
+  title: string,
+  body: string | undefined,
+  context: ResolvedCliExecutionContext
+): Promise<{ issue?: IssueRecord; error?: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  if (token === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "gtea issue create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+      }
+    };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body === undefined ? { title } : { title, body })
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while creating an issue on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while creating an issue in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while creating an issue in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while creating an issue in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {
+      issue: mapIssueRecord(repository, await response.json() as GiteaIssuePayload, 0)
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to create an issue on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function commentOnIssue(
+  repository: RepositoryContext,
+  issueNumber: number,
+  body: string,
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  if (token === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "gtea issue comment requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+      }
+    };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}/comments`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ body })
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while commenting on issue #${issueNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 404) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Issue #${issueNumber} was not found in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while commenting on issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while commenting on issue #${issueNumber} in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while commenting on issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to comment on issue #${issueNumber} on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function updateIssue(
+  repository: RepositoryContext,
+  issueNumber: number,
+  payload: { title?: string; body?: string; state?: "open" | "closed" },
+  context: ResolvedCliExecutionContext,
+  commandName: "edit" | "close" | "reopen",
+  actionLabel: string
+): Promise<{ issue?: IssueRecord; error?: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  if (token === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `gtea issue ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
+      }
+    };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "PATCH",
+      headers: {
+        Authorization: `token ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while ${actionLabel} issue #${issueNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 404) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Issue #${issueNumber} was not found in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {
+      issue: mapIssueRecord(repository, await response.json() as GiteaIssuePayload, issueNumber)
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to ${commandName} issue #${issueNumber} on ${repository.hostname}: ${message}\n`
       }
     };
   }
@@ -468,11 +1000,288 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     return undefined;
   }
 
-  if (args[1] !== "view" && args[1] !== "list" && args[1] !== "status") {
+  if (
+    args[1] !== "view"
+    && args[1] !== "list"
+    && args[1] !== "status"
+    && args[1] !== "create"
+    && args[1] !== "comment"
+    && args[1] !== "edit"
+    && args[1] !== "close"
+    && args[1] !== "reopen"
+  ) {
     return undefined;
   }
 
   const subcommand = args[1];
+
+  if (subcommand === "create") {
+    const parsedCreateFlags = parseIssueCreateFlags(args.slice(2));
+
+    if (parsedCreateFlags.error !== undefined) {
+      return parsedCreateFlags.error;
+    }
+
+    if (parsedCreateFlags.flags.title === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "--title is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedCreateFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const createResult = await createIssue(
+      repositoryResult.repository,
+      parsedCreateFlags.flags.title,
+      parsedCreateFlags.flags.body,
+      context
+    );
+
+    if (createResult.error !== undefined || createResult.issue === undefined) {
+      return createResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to create issue.\n"
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: `${createResult.issue.url}\n`,
+      stderr: ""
+    };
+  }
+
+  if (subcommand === "comment") {
+    const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
+      allowTitle: false,
+      allowBody: true
+    });
+
+    if (parsedMutationFlags.error !== undefined) {
+      return parsedMutationFlags.error;
+    }
+
+    if (parsedMutationFlags.flags.issueNumber === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Issue number is required.\n"
+      };
+    }
+
+    if (parsedMutationFlags.flags.body === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "--body is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedMutationFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const commentResult = await commentOnIssue(
+      repositoryResult.repository,
+      parsedMutationFlags.flags.issueNumber,
+      parsedMutationFlags.flags.body,
+      context
+    );
+
+    if (commentResult.error !== undefined) {
+      return commentResult.error;
+    }
+
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    };
+  }
+
+  if (subcommand === "edit") {
+    const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
+      allowTitle: true,
+      allowBody: true
+    });
+
+    if (parsedMutationFlags.error !== undefined) {
+      return parsedMutationFlags.error;
+    }
+
+    if (parsedMutationFlags.flags.issueNumber === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Issue number is required.\n"
+      };
+    }
+
+    if (parsedMutationFlags.flags.title === undefined && parsedMutationFlags.flags.body === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "At least one of --title or --body is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedMutationFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const editResult = await updateIssue(
+      repositoryResult.repository,
+      parsedMutationFlags.flags.issueNumber,
+      {
+        ...(parsedMutationFlags.flags.title === undefined ? {} : { title: parsedMutationFlags.flags.title }),
+        ...(parsedMutationFlags.flags.body === undefined ? {} : { body: parsedMutationFlags.flags.body })
+      },
+      context,
+      "edit",
+      "editing"
+    );
+
+    if (editResult.error !== undefined || editResult.issue === undefined) {
+      return editResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to edit issue.\n"
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: `${editResult.issue.url}\n`,
+      stderr: ""
+    };
+  }
+
+  if (subcommand === "close") {
+    const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
+      allowTitle: false,
+      allowBody: false
+    });
+
+    if (parsedMutationFlags.error !== undefined) {
+      return parsedMutationFlags.error;
+    }
+
+    if (parsedMutationFlags.flags.issueNumber === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Issue number is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedMutationFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const closeResult = await updateIssue(
+      repositoryResult.repository,
+      parsedMutationFlags.flags.issueNumber,
+      { state: "closed" },
+      context,
+      "close",
+      "closing"
+    );
+
+    if (closeResult.error !== undefined || closeResult.issue === undefined) {
+      return closeResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to close issue.\n"
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: `${closeResult.issue.url}\n`,
+      stderr: ""
+    };
+  }
+
+  if (subcommand === "reopen") {
+    const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
+      allowTitle: false,
+      allowBody: false
+    });
+
+    if (parsedMutationFlags.error !== undefined) {
+      return parsedMutationFlags.error;
+    }
+
+    if (parsedMutationFlags.flags.issueNumber === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Issue number is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedMutationFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const reopenResult = await updateIssue(
+      repositoryResult.repository,
+      parsedMutationFlags.flags.issueNumber,
+      { state: "open" },
+      context,
+      "reopen",
+      "reopening"
+    );
+
+    if (reopenResult.error !== undefined || reopenResult.issue === undefined) {
+      return reopenResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to reopen issue.\n"
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: `${reopenResult.issue.url}\n`,
+      stderr: ""
+    };
+  }
 
   const parsedFlags = parseIssueFlags(args.slice(2));
 

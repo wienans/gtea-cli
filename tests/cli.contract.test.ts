@@ -395,6 +395,470 @@ test("issue status reports relevant open issues for the authenticated user", asy
   }
 });
 
+test("issue create posts a new issue to the selected Gitea host", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/issues") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      title: "Ship the issue maintenance slice",
+      body: "Implement create first."
+    });
+
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 18,
+        title: "Ship the issue maintenance slice",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Ship the issue maintenance slice",
+      "--body",
+      "Implement create first."
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/18\n`);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue comment posts a comment to the selected Gitea host", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token comment-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/issues/18/comments") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      body: "Comment from gtea"
+    });
+
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(JSON.stringify({ id: 9 }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "comment",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--body",
+      "Comment from gtea"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "comment-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue edit patches the selected issue on the Gitea host", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "PATCH" || request.url !== "/api/v1/repos/octo/project/issues/18") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      title: "Retitle the issue",
+      body: "Updated issue body"
+    });
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 18,
+        title: "Retitle the issue",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Retitle the issue",
+      "--body",
+      "Updated issue body"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/18\n`);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue close patches the selected issue state to closed", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token close-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "PATCH" || request.url !== "/api/v1/repos/octo/project/issues/18") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      state: "closed"
+    });
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 18,
+        title: "Close the issue",
+        state: "closed"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "close",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "close-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/18\n`);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue reopen patches the selected issue state to open", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token reopen-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "PATCH" || request.url !== "/api/v1/repos/octo/project/issues/18") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      state: "open"
+    });
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 18,
+        title: "Reopen the issue",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "reopen",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "reopen-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/18\n`);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue create reports authentication failures from the selected Gitea host", async () => {
+  const server = createServer((request, response) => {
+    if (request.method === "POST" && request.url === "/api/v1/repos/octo/project/issues") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Auth failure"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "bad-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Authentication failed while creating an issue/);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue create reports validation failures from the selected Gitea host", async () => {
+  const server = createServer((request, response) => {
+    if (request.method === "POST" && request.url === "/api/v1/repos/octo/project/issues") {
+      response.writeHead(422, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "title is required" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Validation failure"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "valid-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Validation failed while creating an issue/);
+    assert.match(result.stderr, /title is required/);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue create fails clearly for unsupported recover semantics", async () => {
+  const result = await executeCli([
+    "issue",
+    "create",
+    "-R",
+    "gitea.example.com/octo/project",
+    "--recover",
+    "draft-1",
+    "--title",
+    "Unsupported"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /issue create flag --recover is currently unsupported/i);
+});
+
 test("browse help shows the supported routing flags", async () => {
   const result = await executeCli(["browse", "--help"]);
 
