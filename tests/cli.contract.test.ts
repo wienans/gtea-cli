@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -44,13 +43,214 @@ test("issue help exposes the full manifest-backed issue tree", () => {
   assert.match(result.stdout, /reopen/);
 });
 
-test("browse help renders as a top-level unsupported command", () => {
+test("browse help shows the supported routing flags", () => {
   const result = executeCli(["browse", "--help"]);
 
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /Open repository routes in the browser/);
-  assert.match(result.stdout, /Pending Repository Context resolution and browse routing/);
+  assert.match(result.stdout, /supported/i);
+  assert.match(result.stdout, /--settings/);
+  assert.match(result.stdout, /--wiki/);
+  assert.match(result.stdout, /--releases/);
   assert.match(result.stdout, /--no-browser/);
+  assert.match(result.stdout, /--repo/);
+  assert.doesNotMatch(result.stdout, /Pending Repository Context resolution/i);
+});
+
+test("browse --no-browser uses the active host when -R omits it", () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-browse-"));
+
+  try {
+    const env = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot
+    };
+
+    assert.equal(
+      executeCli(["auth", "login", "--hostname", "browse.example.com", "--with-token"], {
+        env,
+        stdin: "browse-token\n"
+      }).exitCode,
+      0
+    );
+
+    const result = executeCli(["browse", "--no-browser", "-R", "octo/project"], { env });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "https://browse.example.com/octo/project\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
+test("browse --no-browser infers the repository from the current git remote", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "gtea-browse-repo-"));
+
+  try {
+    const initResult = spawnSync("git", ["init", "--initial-branch=trunk"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(initResult.status, 0, initResult.stderr);
+
+    const remoteResult = spawnSync("git", ["remote", "add", "origin", "https://gitea.example.com/octo/project.git"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(remoteResult.status, 0, remoteResult.stderr);
+
+    const result = executeCli(["browse", "--no-browser"], { cwd: repoRoot });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "https://gitea.example.com/octo/project\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(repoRoot, { force: true, recursive: true });
+  }
+});
+
+test("browse synthesizes deterministic routes for issues, pull requests, commits, files, and browse sections", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "gtea-browse-routes-"));
+
+  try {
+    assert.equal(
+      spawnSync("git", ["init", "--initial-branch=trunk"], {
+        cwd: repoRoot,
+        encoding: "utf8"
+      }).status,
+      0
+    );
+    assert.equal(
+      spawnSync("git", ["config", "user.email", "browse@example.com"], {
+        cwd: repoRoot,
+        encoding: "utf8"
+      }).status,
+      0
+    );
+    assert.equal(
+      spawnSync("git", ["config", "user.name", "Browse Test"], {
+        cwd: repoRoot,
+        encoding: "utf8"
+      }).status,
+      0
+    );
+    assert.equal(
+      spawnSync("git", ["remote", "add", "origin", "https://gitea.example.com/octo/project.git"], {
+        cwd: repoRoot,
+        encoding: "utf8"
+      }).status,
+      0
+    );
+
+    mkdirSync(join(repoRoot, "src"), { recursive: true });
+    writeFileSync(join(repoRoot, "src", "example.ts"), "console.log('browse');\nconsole.log('routes');\n", "utf8");
+
+    assert.equal(
+      spawnSync("git", ["add", "."], {
+        cwd: repoRoot,
+        encoding: "utf8"
+      }).status,
+      0
+    );
+    assert.equal(
+      spawnSync("git", ["commit", "-m", "add browse example"], {
+        cwd: repoRoot,
+        encoding: "utf8"
+      }).status,
+      0
+    );
+
+    const commitShaResult = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(commitShaResult.status, 0, commitShaResult.stderr);
+
+    const commitSha = commitShaResult.stdout.trim();
+
+    const cases = [
+      {
+        args: ["browse", "--no-browser", "12"],
+        expectedUrl: "https://gitea.example.com/octo/project/issues/12"
+      },
+      {
+        args: ["browse", "--no-browser", "pulls/34"],
+        expectedUrl: "https://gitea.example.com/octo/project/pulls/34"
+      },
+      {
+        args: ["browse", "--no-browser", commitSha],
+        expectedUrl: `https://gitea.example.com/octo/project/commit/${commitSha}`
+      },
+      {
+        args: ["browse", "--no-browser", "src/example.ts"],
+        expectedUrl: "https://gitea.example.com/octo/project/src/branch/trunk/src/example.ts"
+      },
+      {
+        args: ["browse", "--no-browser", "src/example.ts:2"],
+        expectedUrl: "https://gitea.example.com/octo/project/src/branch/trunk/src/example.ts#L2"
+      },
+      {
+        args: ["browse", "--no-browser", "--settings"],
+        expectedUrl: "https://gitea.example.com/octo/project/settings"
+      },
+      {
+        args: ["browse", "--no-browser", "--wiki"],
+        expectedUrl: "https://gitea.example.com/octo/project/wiki"
+      },
+      {
+        args: ["browse", "--no-browser", "--releases"],
+        expectedUrl: "https://gitea.example.com/octo/project/releases"
+      }
+    ];
+
+    for (const browseCase of cases) {
+      const result = executeCli(browseCase.args, { cwd: repoRoot });
+
+      assert.equal(result.exitCode, 0, `expected success for ${browseCase.args.join(" ")}`);
+      assert.equal(result.stdout, `${browseCase.expectedUrl}\n`);
+      assert.equal(result.stderr, "");
+    }
+  } finally {
+    rmSync(repoRoot, { force: true, recursive: true });
+  }
+});
+
+test("browse honors a host-qualified -R target over the stored active host", () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-browse-host-"));
+
+  try {
+    const env = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot
+    };
+
+    assert.equal(
+      executeCli(["auth", "login", "--hostname", "stored.example.com", "--with-token"], {
+        env,
+        stdin: "stored-token\n"
+      }).exitCode,
+      0
+    );
+
+    const result = executeCli(["browse", "--no-browser", "-R", "alt.example.com/octo/project"], { env });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "https://alt.example.com/octo/project\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
+test("browse rejects github.com as a non-eligible host", () => {
+  const result = executeCli(["browse", "--no-browser", "-R", "github.com/octo/project"]);
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /github\.com is not an Eligible Host/i);
 });
 
 test("auth login persists a PAT and status reports the active host", () => {

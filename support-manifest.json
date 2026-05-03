@@ -44,12 +44,36 @@
           "-R"
         ],
         "summary": "Select the Repository Context explicitly",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "--no-browser",
         "summary": "Print the synthesized URL instead of opening a browser",
-        "status": "unsupported"
+        "status": "supported"
+      },
+      {
+        "name": "--settings",
+        "aliases": [
+          "-s"
+        ],
+        "summary": "Open repository settings",
+        "status": "supported"
+      },
+      {
+        "name": "--wiki",
+        "aliases": [
+          "-w"
+        ],
+        "summary": "Open repository wiki",
+        "status": "supported"
+      },
+      {
+        "name": "--releases",
+        "aliases": [
+          "-r"
+        ],
+        "summary": "Open repository releases",
+        "status": "supported"
       }
     ],
     "authHost": [
@@ -258,8 +282,7 @@
       "kind": "command",
       "name": "browse",
       "summary": "Open repository routes in the browser",
-      "status": "unsupported",
-      "reason": "Pending Repository Context resolution and browse routing (#4).",
+      "status": "supported",
       "flagProfiles": [
         "browseOptions"
       ]
