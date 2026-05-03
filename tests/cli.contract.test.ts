@@ -66,6 +66,21 @@ test("issue view help classifies --comments as supported", async () => {
   assert.match(result.stdout, /--comments[\s\S]*supported/i);
 });
 
+test("issue edit help classifies supported and unsupported metadata flags", async () => {
+  const result = await executeCli(["issue", "edit", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--body-file[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--add-label[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--remove-label[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--add-assignee[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--remove-assignee[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--milestone[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--remove-milestone[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--add-project[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--remove-project[\s\S]*\[unsupported\]/i);
+});
+
 test("issue view reads a single issue from the selected Gitea host", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/issues/42") {
@@ -1266,8 +1281,587 @@ test("issue edit patches the selected issue on the Gitea host", async () => {
     });
 
     assert.equal(result.exitCode, 0);
-    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/18\n`);
+    assert.equal(result.stdout, "");
     assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue edit reads the updated body from --body-file and stays quiet on success", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "gtea-issue-edit-body-file-"));
+  const bodyPath = join(tempDir, "issue-body.md");
+  writeFileSync(bodyPath, "Updated issue body from file\n");
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "PATCH" || request.url !== "/api/v1/repos/octo/project/issues/18") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      body: "Updated issue body from file\n"
+    });
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 18,
+        title: "Retitle the issue",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--body-file",
+      bodyPath
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("issue edit reads body text from stdin when --body-file - is used", async () => {
+  let requestPayload: unknown;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "PATCH" || request.url !== "/api/v1/repos/octo/project/issues/18") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    requestPayload = JSON.parse(requestBody);
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 18,
+        title: "Retitle the issue",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--body-file",
+      "-"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      },
+      stdin: "Updated issue body from stdin\n"
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.deepEqual(requestPayload, {
+      body: "Updated issue body from stdin\n"
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue edit applies supported label, assignee, and milestone metadata changes", async () => {
+  let sawIssueRead = false;
+  let sawCurrentUserRead = false;
+  let sawLabelsRead = false;
+  let sawMilestonesRead = false;
+  let sawIssuePatch = false;
+  let sawLabelUpdate = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      sawIssueRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 18,
+          title: "Retitle the issue",
+          state: "open",
+          labels: [
+            { id: 1, name: "bug" },
+            { id: 2, name: "help wanted" }
+          ],
+          assignees: [
+            { login: "octocat" },
+            { login: "someone-else" }
+          ],
+          milestone: { id: 3, title: "Backlog" }
+        })
+      );
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/user") {
+      sawCurrentUserRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ login: "hubot" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/labels") {
+      sawLabelsRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          { id: 1, name: "bug" },
+          { id: 2, name: "help wanted" },
+          { id: 4, name: "triage" }
+        ])
+      );
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/milestones?state=all") {
+      sawMilestonesRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          { id: 3, title: "Backlog" },
+          { id: 8, title: "Sprint 2" }
+        ])
+      );
+      return;
+    }
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      sawIssuePatch = true;
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        assignees: ["octocat", "hubot"],
+        milestone: 8
+      });
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 18,
+          title: "Retitle the issue",
+          state: "open"
+        })
+      );
+      return;
+    }
+
+    if (request.method === "PUT" && request.url === "/api/v1/repos/octo/project/issues/18/labels") {
+      sawLabelUpdate = true;
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        labels: [1, 4]
+      });
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([{ id: 1, name: "bug" }, { id: 4, name: "triage" }]));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--add-label",
+      "triage",
+      "--remove-label",
+      "help wanted",
+      "--add-assignee",
+      "@me",
+      "--remove-assignee",
+      "someone-else",
+      "--milestone",
+      "Sprint 2"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.equal(sawIssueRead, true);
+    assert.equal(sawCurrentUserRead, true);
+    assert.equal(sawLabelsRead, true);
+    assert.equal(sawMilestonesRead, true);
+    assert.equal(sawIssuePatch, true);
+    assert.equal(sawLabelUpdate, true);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue edit removes the milestone when --remove-milestone is used", async () => {
+  let sawIssueRead = false;
+  let sawIssuePatch = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      sawIssueRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 18,
+          title: "Retitle the issue",
+          state: "open",
+          milestone: { id: 3, title: "Backlog" }
+        })
+      );
+      return;
+    }
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      sawIssuePatch = true;
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        milestone: 0
+      });
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 18,
+          title: "Retitle the issue",
+          state: "open"
+        })
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--remove-milestone"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.equal(sawIssueRead, true);
+    assert.equal(sawIssuePatch, true);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue edit rejects @copilot as an explicit unsupported assignee alias", async () => {
+  const result = await executeCli([
+    "issue",
+    "edit",
+    "18",
+    "-R",
+    "gitea.example.com/octo/project",
+    "--add-assignee",
+    "@copilot"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /gtea issue edit flag --add-assignee is currently unsupported/i);
+  assert.match(result.stderr, /copilot assignee aliases are not supported on gitea hosts/i);
+});
+
+test("issue edit rejects unsupported project edit flags explicitly", async () => {
+  const result = await executeCli([
+    "issue",
+    "edit",
+    "18",
+    "-R",
+    "gitea.example.com/octo/project",
+    "--add-project",
+    "Roadmap"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /gtea issue edit flag --add-project is currently unsupported/i);
+  assert.match(result.stderr, /project edits are not part of the supported issue maintenance slice/i);
+});
+
+test("issue edit reports a validation failure when the milestone title is unknown", async () => {
+  let sawIssuePatch = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 18,
+          title: "Retitle the issue",
+          state: "open"
+        })
+      );
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/milestones?state=all") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([{ id: 3, title: "Backlog" }]));
+      return;
+    }
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      sawIssuePatch = true;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--milestone",
+      "Sprint 2"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /validation failed while editing issue #18 in octo\/project/i);
+    assert.match(result.stderr, /milestone "Sprint 2" was not found/i);
+    assert.equal(sawIssuePatch, false);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue edit reports not found when the selected issue is missing during metadata planning", async () => {
+  let sawIssuePatch = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      sawIssuePatch = true;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--remove-milestone"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /issue #18 was not found in octo\/project/i);
+    assert.equal(sawIssuePatch, false);
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => {
