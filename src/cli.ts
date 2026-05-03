@@ -2,6 +2,7 @@ import { executeAuthCommand } from "./auth.js";
 import { executeBrowseCommand } from "./browse.js";
 import { CliExecutionContext, CliResult, resolveCliExecutionContext } from "./cli-runtime.js";
 import { executeIssueCommand } from "./issue.js";
+import { executePrCommand } from "./pr.js";
 import { ManifestCommand, ManifestGroup, ManifestNode, supportManifest } from "./support-manifest.js";
 
 export type { CliExecutionContext, CliResult } from "./cli-runtime.js";
@@ -187,6 +188,12 @@ export async function executeCli(args: string[], context: CliExecutionContext = 
 
     if (issueResult !== undefined) {
       return issueResult;
+    }
+
+    const prResult = await executePrCommand(args, executionContext);
+
+    if (prResult !== undefined) {
+      return prResult;
     }
   }
 

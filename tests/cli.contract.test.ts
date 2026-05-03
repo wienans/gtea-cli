@@ -103,6 +103,58 @@ test("issue view reads a single issue from the selected Gitea host", async () =>
   }
 });
 
+test("pr view reads a single pull request from the selected Gitea host", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the pull request read slice",
+        state: "open",
+        base: {
+          ref: "main"
+        },
+        head: {
+          ref: "feature/pr-read"
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["pr", "view", "42", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Ship the pull request read slice/);
+    assert.match(result.stdout, /open/i);
+    assert.match(result.stdout, /feature\/pr-read/);
+    assert.match(result.stdout, /main/);
+    assert.match(result.stdout, new RegExp(`http://127\\.0\\.0\\.1:${port}/octo/project/pulls/42`));
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("issue list reads repository issues from the selected Gitea host", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/issues?state=open") {
@@ -140,6 +192,71 @@ test("issue list reads repository issues from the selected Gitea host", async ()
     assert.match(result.stdout, /Validate repository context reuse/);
     assert.match(result.stdout, /#12/);
     assert.match(result.stdout, /open/i);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr list reads repository pull requests from the selected Gitea host", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/pulls?state=open") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          number: 7,
+          title: "Add structured PR reads",
+          state: "open",
+          head: {
+            ref: "feature/pr-read"
+          },
+          base: {
+            ref: "main"
+          }
+        },
+        {
+          number: 12,
+          title: "Document checkout semantics",
+          state: "open",
+          head: {
+            ref: "docs/checkout"
+          },
+          base: {
+            ref: "main"
+          }
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["pr", "list", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /#7/);
+    assert.match(result.stdout, /Add structured PR reads/);
+    assert.match(result.stdout, /feature\/pr-read -> main/);
+    assert.match(result.stdout, /#12/);
+    assert.match(result.stdout, /Document checkout semantics/);
     assert.equal(result.stderr, "");
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -210,6 +327,69 @@ test("issue view supports manifest-backed json output fields", async () => {
   }
 });
 
+test("pr view supports manifest-backed json output fields", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the pull request read slice",
+        state: "open",
+        base: {
+          ref: "main"
+        },
+        head: {
+          ref: "feature/pr-read"
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "number,title,state,headRefName,baseRefName,url"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      number: 42,
+      title: "Ship the pull request read slice",
+      state: "open",
+      headRefName: "feature/pr-read",
+      baseRefName: "main",
+      url: `http://127.0.0.1:${port}/octo/project/pulls/42`
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("issue view supports jq filtering on json output", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/issues/42") {
@@ -241,6 +421,64 @@ test("issue view supports jq filtering on json output", async () => {
       `127.0.0.1:${port}/octo/project`,
       "--json",
       "number,title,state,url",
+      "--jq",
+      ".number"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "42\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr view supports jq filtering on json output", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the pull request read slice",
+        state: "open",
+        base: {
+          ref: "main"
+        },
+        head: {
+          ref: "feature/pr-read"
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "number,title,state,headRefName,baseRefName,url",
       "--jq",
       ".number"
     ]);
@@ -299,6 +537,64 @@ test("issue view supports template formatting on json output", async () => {
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "Ship the issue read slice (#42)\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr view supports template formatting on json output", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the pull request read slice",
+        state: "open",
+        base: {
+          ref: "main"
+        },
+        head: {
+          ref: "feature/pr-read"
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "number,title,state,headRefName,baseRefName,url",
+      "--template",
+      "{{.title}} (#{{.number}})"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "Ship the pull request read slice (#42)\n");
     assert.equal(result.stderr, "");
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -395,6 +691,93 @@ test("issue status reports relevant open issues for the authenticated user", asy
   }
 });
 
+test("pr status reports relevant open pull requests for the authenticated user", async () => {
+  const server = createServer((request, response) => {
+    if (request.headers.authorization !== "token pr-status-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.url === "/api/v1/user") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ login: "octocat" }));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls?state=open") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            number: 7,
+            title: "Review the structured output contract",
+            state: "open",
+            assignees: [{ login: "octocat" }],
+            user: { login: "teammate" },
+            head: { ref: "feature/pr-read" },
+            base: { ref: "main" }
+          },
+          {
+            number: 12,
+            title: "Document checkout behavior",
+            state: "open",
+            assignees: [],
+            user: { login: "octocat" },
+            head: { ref: "docs/checkout" },
+            base: { ref: "main" }
+          },
+          {
+            number: 21,
+            title: "Unrelated pull request",
+            state: "open",
+            assignees: [{ login: "someone-else" }],
+            user: { login: "someone-else" },
+            head: { ref: "feature/unrelated" },
+            base: { ref: "main" }
+          }
+        ])
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["pr", "status", "-R", `127.0.0.1:${port}/octo/project`], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-status-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Assigned to you/);
+    assert.match(result.stdout, /Review the structured output contract/);
+    assert.match(result.stdout, /Opened by you/);
+    assert.match(result.stdout, /Document checkout behavior/);
+    assert.doesNotMatch(result.stdout, /Unrelated pull request/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("issue create posts a new issue to the selected Gitea host", async () => {
   const server = createServer(async (request, response) => {
     if (request.headers.authorization !== "token create-token") {
@@ -466,6 +849,61 @@ test("issue create posts a new issue to the selected Gitea host", async () => {
       })
     );
   }
+});
+
+test("pr diff prints the unified diff for the selected pull request", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/pulls/42.diff") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    response.end(
+      [
+        "diff --git a/src/pr.ts b/src/pr.ts",
+        "index 1111111..2222222 100644",
+        "--- a/src/pr.ts",
+        "+++ b/src/pr.ts",
+        "@@ -1,1 +1,2 @@",
+        "+console.log('pr diff')"
+      ].join("\n") + "\n"
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["pr", "diff", "42", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /diff --git a\/src\/pr\.ts b\/src\/pr\.ts/);
+    assert.match(result.stdout, /\+console\.log\('pr diff'\)/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr checks fails clearly when no honest semantic match exists", async () => {
+  const result = await executeCli(["pr", "checks"]);
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /gtea pr checks is currently unsupported/i);
+  assert.match(result.stderr, /no compatible check-run surface/i);
+  assert.equal(result.stdout, "");
 });
 
 test("issue comment posts a comment to the selected Gitea host", async () => {
@@ -925,6 +1363,142 @@ test("browse --no-browser infers the repository from the current git remote", as
     assert.equal(result.stderr, "");
   } finally {
     rmSync(repoRoot, { force: true, recursive: true });
+  }
+});
+
+test("pr checkout uses the Git Toolchain to fetch and switch to the pull request head", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the pull request checkout slice",
+        state: "open",
+        base: {
+          ref: "main"
+        },
+        head: {
+          ref: "feature/pr-read"
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+  const remoteRoot = mkdtempSync(join(tmpdir(), "gtea-pr-remote-"));
+  const sourceRoot = mkdtempSync(join(tmpdir(), "gtea-pr-source-"));
+  const checkoutRoot = mkdtempSync(join(tmpdir(), "gtea-pr-checkout-"));
+
+  try {
+    assert.equal(spawnSync("git", ["init", "--bare", remoteRoot], {
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["init", "--initial-branch=main"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["config", "user.email", "checkout@example.com"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["config", "user.name", "Checkout Test"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+
+    writeFileSync(join(sourceRoot, "feature.txt"), "base\n", "utf8");
+
+    assert.equal(spawnSync("git", ["add", "feature.txt"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["commit", "-m", "base commit"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["remote", "add", "origin", remoteRoot], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["push", "-u", "origin", "main"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["checkout", "-b", "feature/pr-read"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+
+    writeFileSync(join(sourceRoot, "feature.txt"), "base\npr branch\n", "utf8");
+
+    assert.equal(spawnSync("git", ["add", "feature.txt"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["commit", "-m", "pull request head"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+
+    const featureCommitResult = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(featureCommitResult.status, 0, featureCommitResult.stderr);
+
+    const featureCommit = featureCommitResult.stdout.trim();
+
+    assert.equal(spawnSync("git", ["push", "origin", "feature/pr-read"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["--git-dir", remoteRoot, "update-ref", "refs/pull/42/head", featureCommit], {
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["clone", remoteRoot, checkoutRoot], {
+      encoding: "utf8"
+    }).status, 0);
+
+    const result = await executeCli(["pr", "checkout", "42", "-R", `127.0.0.1:${port}/octo/project`], {
+      cwd: checkoutRoot
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Checked out pull request #42 to feature\/pr-read/i);
+    assert.equal(result.stderr, "");
+
+    const currentBranchResult = spawnSync("git", ["branch", "--show-current"], {
+      cwd: checkoutRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(currentBranchResult.status, 0, currentBranchResult.stderr);
+    assert.equal(currentBranchResult.stdout.trim(), "feature/pr-read");
+    assert.equal(readFileSync(join(checkoutRoot, "feature.txt"), "utf8"), "base\npr branch\n");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+
+    rmSync(remoteRoot, { force: true, recursive: true });
+    rmSync(sourceRoot, { force: true, recursive: true });
+    rmSync(checkoutRoot, { force: true, recursive: true });
   }
 });
 
