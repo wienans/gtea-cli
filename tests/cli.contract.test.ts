@@ -292,6 +292,63 @@ test("auth login rejects github.com as a non-eligible host", () => {
   }
 });
 
+test("auth status rejects an invalid explicit hostname instead of falling back to the active host", () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
+
+  try {
+    const env = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot
+    };
+
+    assert.equal(
+      executeCli(["auth", "login", "--hostname", "valid.example.com", "--with-token"], {
+        env,
+        stdin: "valid-token\n"
+      }).exitCode,
+      0
+    );
+
+    const result = executeCli(["auth", "status", "--hostname", "not/a/host"], { env });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /Invalid value for --hostname: not\/a\/host/i);
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
+test("auth status rejects an invalid GTEA_HOST instead of falling back to stored config", () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
+
+  try {
+    const persistedEnv = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot
+    };
+
+    assert.equal(
+      executeCli(["auth", "login", "--hostname", "valid.example.com", "--with-token"], {
+        env: persistedEnv,
+        stdin: "valid-token\n"
+      }).exitCode,
+      0
+    );
+
+    const result = executeCli(["auth", "status"], {
+      env: {
+        ...persistedEnv,
+        GTEA_HOST: "not/a/host"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /Invalid value for GTEA_HOST: not\/a\/host/i);
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
 test("auth git-credential returns oauth2 credentials for the configured host", () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 

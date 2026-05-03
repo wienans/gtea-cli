@@ -109,6 +109,29 @@ function parseHostname(rawValue: string | undefined): string | undefined {
   }
 }
 
+function parseProvidedHostname(
+  rawValue: string | undefined,
+  source: string
+): { hostname?: string; error?: CliResult } {
+  if (rawValue === undefined) {
+    return {};
+  }
+
+  const hostname = parseHostname(rawValue);
+
+  if (hostname === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Invalid value for ${source}: ${rawValue}\n`
+      }
+    };
+  }
+
+  return { hostname };
+}
+
 function isEligibleHost(hostname: string): boolean {
   const hostnameWithoutPort = hostname.split(":")[0] ?? hostname;
 
@@ -152,13 +175,35 @@ function parseAuthFlags(args: string[]): { flags: ParsedAuthFlags; error?: CliRe
         };
       }
 
-      flags.hostname = rawHostname;
+      const parsedHostname = parseProvidedHostname(rawHostname, "--hostname");
+
+      if (parsedHostname.error !== undefined) {
+        return {
+          flags,
+          error: parsedHostname.error
+        };
+      }
+
+      if (parsedHostname.hostname !== undefined) {
+        flags.hostname = parsedHostname.hostname;
+      }
       index += 1;
       continue;
     }
 
     if (token.startsWith("--hostname=")) {
-      flags.hostname = token.slice("--hostname=".length);
+      const parsedHostname = parseProvidedHostname(token.slice("--hostname=".length), "--hostname");
+
+      if (parsedHostname.error !== undefined) {
+        return {
+          flags,
+          error: parsedHostname.error
+        };
+      }
+
+      if (parsedHostname.hostname !== undefined) {
+        flags.hostname = parsedHostname.hostname;
+      }
       continue;
     }
 
@@ -175,8 +220,16 @@ function parseAuthFlags(args: string[]): { flags: ParsedAuthFlags; error?: CliRe
   return { flags };
 }
 
-function resolveEnvHost(context: ResolvedCliExecutionContext): string | undefined {
-  return parseHostname(context.env.GTEA_HOST ?? context.env.GH_HOST);
+function resolveEnvHost(context: ResolvedCliExecutionContext): { hostname?: string; error?: CliResult } {
+  if (context.env.GTEA_HOST !== undefined) {
+    return parseProvidedHostname(context.env.GTEA_HOST, "GTEA_HOST");
+  }
+
+  if (context.env.GH_HOST !== undefined) {
+    return parseProvidedHostname(context.env.GH_HOST, "GH_HOST");
+  }
+
+  return {};
 }
 
 function resolveEnvToken(context: ResolvedCliExecutionContext): { token: string; source: string } | undefined {
@@ -200,10 +253,27 @@ function resolveEnvToken(context: ResolvedCliExecutionContext): { token: string;
 function resolveSelectedHost(
   explicitHostname: string | undefined,
   context: ResolvedCliExecutionContext,
-  config: NativeAuthConfig
+  config: NativeAuthConfig,
+  explicitHostnameSource = "--hostname"
 ): { hostname?: string; error?: CliResult } {
   const fallbackStoredHost = Object.keys(config.hosts).sort()[0];
-  const parsedHostname = parseHostname(explicitHostname) ?? resolveEnvHost(context) ?? config.activeHost ?? fallbackStoredHost;
+  const explicitHost = parseProvidedHostname(explicitHostname, explicitHostnameSource);
+
+  if (explicitHost.error !== undefined) {
+    return {
+      error: explicitHost.error
+    };
+  }
+
+  const envHost = resolveEnvHost(context);
+
+  if (envHost.error !== undefined) {
+    return {
+      error: envHost.error
+    };
+  }
+
+  const parsedHostname = explicitHost.hostname ?? envHost.hostname ?? config.activeHost ?? fallbackStoredHost;
 
   if (parsedHostname === undefined) {
     return {
@@ -233,9 +303,10 @@ function resolveSelectedHost(
 function resolveCredential(
   explicitHostname: string | undefined,
   context: ResolvedCliExecutionContext,
-  config: NativeAuthConfig
+  config: NativeAuthConfig,
+  explicitHostnameSource = "--hostname"
 ): { credential?: ResolvedCredential; error?: CliResult } {
-  const selectedHostResult = resolveSelectedHost(explicitHostname, context, config);
+  const selectedHostResult = resolveSelectedHost(explicitHostname, context, config, explicitHostnameSource);
 
   if (selectedHostResult.error !== undefined) {
     return {
@@ -508,7 +579,9 @@ function handleAuthGitCredential(args: string[], context: ResolvedCliExecutionCo
 
   const gitCredentialInput = parseGitCredentialInput(context.stdin);
   const config = loadNativeAuthConfig(context);
-  const credentialResult = resolveCredential(parsedFlags.flags.hostname ?? gitCredentialInput.host, context, config);
+  const credentialHost = parsedFlags.flags.hostname ?? gitCredentialInput.host;
+  const credentialHostSource = parsedFlags.flags.hostname !== undefined ? "--hostname" : "git credential input host";
+  const credentialResult = resolveCredential(credentialHost, context, config, credentialHostSource);
 
   if (credentialResult.error !== undefined || credentialResult.credential === undefined) {
     return credentialResult.error ?? {
