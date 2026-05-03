@@ -59,6 +59,51 @@ function renderUnsupportedIssueFlag(subcommand: string, flag: string, reason: st
   };
 }
 
+function parseStringFlagValue(
+  args: string[],
+  index: number,
+  options: { long: string; short?: string }
+): { handled: boolean; nextIndex: number; value?: string; error?: CliResult } {
+  const token = args[index];
+  const longPrefix = `${options.long}=`;
+  const matchesNamedFlag = token === options.long || (options.short !== undefined && token === options.short);
+
+  if (!matchesNamedFlag && (token === undefined || !token.startsWith(longPrefix))) {
+    return {
+      handled: false,
+      nextIndex: index
+    };
+  }
+
+  if (token !== undefined && token.startsWith(longPrefix)) {
+    return {
+      handled: true,
+      nextIndex: index,
+      value: token.slice(longPrefix.length)
+    };
+  }
+
+  const rawValue = args[index + 1];
+
+  if (rawValue === undefined || rawValue.startsWith("-")) {
+    return {
+      handled: true,
+      nextIndex: index,
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Missing value for ${options.long}.\n`
+      }
+    };
+  }
+
+  return {
+    handled: true,
+    nextIndex: index + 1,
+    value: rawValue
+  };
+}
+
 function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: CliResult } {
   const flags: ParsedIssueFlags = {};
 
@@ -69,106 +114,66 @@ function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: Cli
       break;
     }
 
-    if (token === "--repo" || token === "-R") {
-      const rawRepository = args[index + 1];
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
 
-      if (rawRepository === undefined || rawRepository.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --repo.\n"
-          }
-        };
-      }
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
 
-      flags.repository = rawRepository;
-      index += 1;
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
       continue;
     }
 
-    if (token.startsWith("--repo=")) {
-      flags.repository = token.slice("--repo=".length);
-      continue;
+    const jsonFlag = parseStringFlagValue(args, index, { long: "--json" });
+
+    if (jsonFlag.error !== undefined) {
+      return {
+        flags,
+        error: jsonFlag.error
+      };
     }
 
-    if (token === "--json") {
-      const rawFields = args[index + 1];
-
-      if (rawFields === undefined || rawFields.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --json.\n"
-          }
-        };
-      }
-
-      flags.jsonFields = rawFields
+    if (jsonFlag.handled && jsonFlag.value !== undefined) {
+      flags.jsonFields = (jsonFlag.value ?? "")
         .split(",")
         .map((field) => field.trim())
         .filter((field) => field.length > 0);
-      index += 1;
+      index = jsonFlag.nextIndex;
       continue;
     }
 
-    if (token === "--jq") {
-      const rawExpression = args[index + 1];
+    const jqFlag = parseStringFlagValue(args, index, { long: "--jq" });
 
-      if (rawExpression === undefined || rawExpression.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --jq.\n"
-          }
-        };
-      }
+    if (jqFlag.error !== undefined) {
+      return {
+        flags,
+        error: jqFlag.error
+      };
+    }
 
-      flags.jqExpression = rawExpression;
-      index += 1;
+    if (jqFlag.handled && jqFlag.value !== undefined) {
+      flags.jqExpression = jqFlag.value;
+      index = jqFlag.nextIndex;
       continue;
     }
 
-    if (token === "--template") {
-      const rawTemplate = args[index + 1];
+    const templateFlag = parseStringFlagValue(args, index, { long: "--template" });
 
-      if (rawTemplate === undefined || rawTemplate.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --template.\n"
-          }
-        };
-      }
-
-      flags.template = rawTemplate;
-      index += 1;
-      continue;
+    if (templateFlag.error !== undefined) {
+      return {
+        flags,
+        error: templateFlag.error
+      };
     }
 
-    if (token.startsWith("--jq=")) {
-      flags.jqExpression = token.slice("--jq=".length);
-      continue;
-    }
-
-    if (token.startsWith("--template=")) {
-      flags.template = token.slice("--template=".length);
-      continue;
-    }
-
-    if (token.startsWith("--json=")) {
-      flags.jsonFields = token
-        .slice("--json=".length)
-        .split(",")
-        .map((field) => field.trim())
-        .filter((field) => field.length > 0);
+    if (templateFlag.handled && templateFlag.value !== undefined) {
+      flags.template = templateFlag.value;
+      index = templateFlag.nextIndex;
       continue;
     }
 
@@ -221,27 +226,18 @@ function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags;
       break;
     }
 
-    if (token === "--repo" || token === "-R") {
-      const rawRepository = args[index + 1];
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
 
-      if (rawRepository === undefined || rawRepository.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --repo.\n"
-          }
-        };
-      }
-
-      flags.repository = rawRepository;
-      index += 1;
-      continue;
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
     }
 
-    if (token.startsWith("--repo=")) {
-      flags.repository = token.slice("--repo=".length);
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
       continue;
     }
 
@@ -256,51 +252,33 @@ function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags;
       };
     }
 
-    if (token === "--title") {
-      const rawTitle = args[index + 1];
+    const titleFlag = parseStringFlagValue(args, index, { long: "--title" });
 
-      if (rawTitle === undefined || rawTitle.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --title.\n"
-          }
-        };
-      }
+    if (titleFlag.error !== undefined) {
+      return {
+        flags,
+        error: titleFlag.error
+      };
+    }
 
-      flags.title = rawTitle;
-      index += 1;
+    if (titleFlag.handled && titleFlag.value !== undefined) {
+      flags.title = titleFlag.value;
+      index = titleFlag.nextIndex;
       continue;
     }
 
-    if (token.startsWith("--title=")) {
-      flags.title = token.slice("--title=".length);
-      continue;
+    const bodyFlag = parseStringFlagValue(args, index, { long: "--body" });
+
+    if (bodyFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFlag.error
+      };
     }
 
-    if (token === "--body") {
-      const rawBody = args[index + 1];
-
-      if (rawBody === undefined || rawBody.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --body.\n"
-          }
-        };
-      }
-
-      flags.body = rawBody;
-      index += 1;
-      continue;
-    }
-
-    if (token.startsWith("--body=")) {
-      flags.body = token.slice("--body=".length);
+    if (bodyFlag.handled && bodyFlag.value !== undefined) {
+      flags.body = bodyFlag.value;
+      index = bodyFlag.nextIndex;
       continue;
     }
 
@@ -341,75 +319,52 @@ function parseIssueMutationFlags(
       break;
     }
 
-    if (token === "--repo" || token === "-R") {
-      const rawRepository = args[index + 1];
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
 
-      if (rawRepository === undefined || rawRepository.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --repo.\n"
-          }
-        };
-      }
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
 
-      flags.repository = rawRepository;
-      index += 1;
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
       continue;
     }
 
-    if (token.startsWith("--repo=")) {
-      flags.repository = token.slice("--repo=".length);
+    const titleFlag = options.allowTitle
+      ? parseStringFlagValue(args, index, { long: "--title" })
+      : { handled: false, nextIndex: index };
+
+    if (titleFlag.error !== undefined) {
+      return {
+        flags,
+        error: titleFlag.error
+      };
+    }
+
+    if (titleFlag.handled && titleFlag.value !== undefined) {
+      flags.title = titleFlag.value;
+      index = titleFlag.nextIndex;
       continue;
     }
 
-    if (options.allowTitle && token === "--title") {
-      const rawTitle = args[index + 1];
+    const bodyFlag = options.allowBody
+      ? parseStringFlagValue(args, index, { long: "--body" })
+      : { handled: false, nextIndex: index };
 
-      if (rawTitle === undefined || rawTitle.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --title.\n"
-          }
-        };
-      }
-
-      flags.title = rawTitle;
-      index += 1;
-      continue;
+    if (bodyFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFlag.error
+      };
     }
 
-    if (options.allowTitle && token.startsWith("--title=")) {
-      flags.title = token.slice("--title=".length);
-      continue;
-    }
-
-    if (options.allowBody && token === "--body") {
-      const rawBody = args[index + 1];
-
-      if (rawBody === undefined || rawBody.startsWith("-")) {
-        return {
-          flags,
-          error: {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Missing value for --body.\n"
-          }
-        };
-      }
-
-      flags.body = rawBody;
-      index += 1;
-      continue;
-    }
-
-    if (options.allowBody && token.startsWith("--body=")) {
-      flags.body = token.slice("--body=".length);
+    if (bodyFlag.handled && bodyFlag.value !== undefined) {
+      flags.body = bodyFlag.value;
+      index = bodyFlag.nextIndex;
       continue;
     }
 
