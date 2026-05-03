@@ -12,6 +12,7 @@ interface ParsedIssueFlags {
   repository?: string;
   jqExpression?: string;
   template?: string;
+  showComments?: boolean;
 }
 
 interface ParsedIssueCreateFlags {
@@ -32,14 +33,34 @@ interface IssueRecord {
   title: string;
   state: string;
   url: string;
+  body?: string;
+  authorLogin?: string;
+  labelNames?: string[];
+  commentCount?: number;
+  comments?: IssueCommentRecord[];
+}
+
+interface IssueCommentRecord {
+  id: number;
+  body: string;
+  authorLogin?: string;
 }
 
 interface GiteaIssuePayload {
   number?: number;
   title?: string;
   state?: string;
+  body?: string;
+  comments?: number;
   assignee?: { login?: string };
   assignees?: Array<{ login?: string }>;
+  user?: { login?: string };
+  labels?: Array<{ name?: string }>;
+}
+
+interface GiteaIssueCommentPayload {
+  id?: number;
+  body?: string;
   user?: { login?: string };
 }
 
@@ -174,6 +195,11 @@ function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: Cli
     if (templateFlag.handled && templateFlag.value !== undefined) {
       flags.template = templateFlag.value;
       index = templateFlag.nextIndex;
+      continue;
+    }
+
+    if (token === "--comments") {
+      flags.showComments = true;
       continue;
     }
 
@@ -413,12 +439,24 @@ function buildIssueUrl(repository: RepositoryContext, issueNumber: number): stri
 
 function mapIssueRecord(repository: RepositoryContext, payload: GiteaIssuePayload, fallbackNumber: number): IssueRecord {
   const number = typeof payload.number === "number" ? payload.number : fallbackNumber;
+  const body = typeof payload.body === "string" ? payload.body : undefined;
+  const authorLogin = typeof payload.user?.login === "string" ? payload.user.login : undefined;
+  const labelNames = Array.isArray(payload.labels)
+    ? payload.labels
+      .map((label) => (typeof label.name === "string" ? label.name : undefined))
+      .filter((label): label is string => label !== undefined && label.length > 0)
+    : [];
+  const commentCount = typeof payload.comments === "number" ? payload.comments : undefined;
 
   return {
     number,
     title: typeof payload.title === "string" ? payload.title : `Issue #${number}`,
     state: typeof payload.state === "string" ? payload.state : "unknown",
-    url: buildIssueUrl(repository, number)
+    url: buildIssueUrl(repository, number),
+    ...(body === undefined ? {} : { body }),
+    ...(authorLogin === undefined ? {} : { authorLogin }),
+    ...(labelNames.length === 0 ? {} : { labelNames }),
+    ...(commentCount === undefined ? {} : { commentCount })
   };
 }
 
@@ -435,6 +473,16 @@ async function readIssue(
       requestUrl,
       token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
     );
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while reading issue #${issueNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
 
     if (response.status === 404) {
       return {
@@ -459,6 +507,77 @@ async function readIssue(
     return {
       issue: mapIssueRecord(repository, await response.json() as GiteaIssuePayload, issueNumber)
     };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read issue #${issueNumber} from ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function readIssueComments(
+  repository: RepositoryContext,
+  issueNumber: number,
+  context: ResolvedCliExecutionContext
+): Promise<{ comments?: IssueCommentRecord[]; error?: CliResult }> {
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}/comments`;
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  try {
+    const response = await fetch(
+      requestUrl,
+      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
+    );
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while reading issue #${issueNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 404) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Issue #${issueNumber} was not found in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while reading issue #${issueNumber}.\n`
+        }
+      };
+    }
+
+    const payload = await response.json() as GiteaIssueCommentPayload[];
+    const comments = payload.map((comment, index) => {
+      const id = typeof comment.id === "number" ? comment.id : index + 1;
+      const body = typeof comment.body === "string" ? comment.body : "";
+      const authorLogin = typeof comment.user?.login === "string" ? comment.user.login : undefined;
+
+      return {
+        id,
+        body,
+        ...(authorLogin === undefined ? {} : { authorLogin })
+      };
+    });
+
+    return { comments };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -850,8 +969,52 @@ async function readCurrentUser(hostname: string, context: ResolvedCliExecutionCo
   }
 }
 
-function renderIssue(issue: IssueRecord): string {
-  return `${issue.title} (#${issue.number})\nState: ${issue.state}\nURL: ${issue.url}\n`;
+function renderIssue(issue: IssueRecord, options?: { showAllComments?: boolean }): string {
+  const lines = [
+    `${issue.title} (#${issue.number})`,
+    `State: ${issue.state}`,
+    ...(issue.authorLogin === undefined ? [] : [`Author: ${issue.authorLogin}`]),
+    ...(issue.labelNames === undefined || issue.labelNames.length === 0 ? [] : [`Labels: ${issue.labelNames.join(", ")}`]),
+    `URL: ${issue.url}`
+  ];
+
+  if (issue.body !== undefined && issue.body.length > 0) {
+    lines.push("", issue.body);
+  }
+
+  if (issue.comments !== undefined && issue.comments.length > 0) {
+    if (options?.showAllComments === true) {
+      for (const comment of issue.comments) {
+        lines.push(
+          "",
+          comment.authorLogin === undefined ? "Comment" : `${comment.authorLogin} • Comment`,
+          "",
+          comment.body
+        );
+      }
+    } else {
+      const newestComment = issue.comments[issue.comments.length - 1];
+
+      if (newestComment === undefined) {
+        return `${lines.join("\n")}\n`;
+      }
+
+      const hiddenCommentCount = Math.max((issue.commentCount ?? issue.comments.length) - 1, 0);
+
+      if (hiddenCommentCount > 0) {
+        lines.push("", `-------- Not showing ${hiddenCommentCount} comment${hiddenCommentCount === 1 ? "" : "s"} --------`);
+      }
+
+      lines.push(
+        "",
+        newestComment.authorLogin === undefined ? "Newest comment" : `${newestComment.authorLogin} • Newest comment`,
+        "",
+        newestComment.body
+      );
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 function renderIssueList(issues: IssueRecord[]): string {
@@ -1260,6 +1423,14 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     };
   }
 
+  if (parsedFlags.flags.showComments === true && subcommand !== "view") {
+    return {
+      exitCode: 1,
+      stdout: "",
+      stderr: "--comments is only supported with issue view.\n"
+    };
+  }
+
   if (parsedFlags.flags.jqExpression !== undefined && parsedFlags.flags.jsonFields === undefined) {
     return {
       exitCode: 1,
@@ -1451,9 +1622,26 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     };
   }
 
+  if (parsedFlags.flags.showComments === true || (issueResult.issue.commentCount ?? 0) > 0) {
+    const commentResult = await readIssueComments(repositoryResult.repository, issueNumber, context);
+
+    if (commentResult.error !== undefined || commentResult.comments === undefined) {
+      return commentResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to read issue comments.\n"
+      };
+    }
+
+    issueResult.issue = {
+      ...issueResult.issue,
+      comments: commentResult.comments
+    };
+  }
+
   return {
     exitCode: 0,
-    stdout: renderIssue(issueResult.issue),
+    stdout: renderIssue(issueResult.issue, { showAllComments: parsedFlags.flags.showComments === true }),
     stderr: ""
   };
 }
