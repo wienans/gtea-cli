@@ -544,6 +544,22 @@ function isPullRequestOpenedByUser(pullRequest: GiteaPullRequestPayload, login: 
   return pullRequest.user?.login === login;
 }
 
+function collectMatchingPullRequests(
+  payload: GiteaPullRequestPayload[],
+  pullRequests: PullRequestRecord[],
+  predicate: (pullRequest: GiteaPullRequestPayload) => boolean
+): PullRequestRecord[] {
+  return payload.reduce<PullRequestRecord[]>((matchingPullRequests, pullRequest, index) => {
+    const record = pullRequests[index];
+
+    if (record !== undefined && predicate(pullRequest)) {
+      matchingPullRequests.push(record);
+    }
+
+    return matchingPullRequests;
+  }, []);
+}
+
 function renderPullRequestStatus(
   repository: RepositoryContext,
   login: string,
@@ -772,16 +788,16 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       };
     }
 
-    const assignedPullRequests = pullRequestListResult.payload
-      .map((pullRequest, index) => ({ pullRequest, record: pullRequestListResult.pullRequests?.[index] }))
-      .filter((entry): entry is { pullRequest: GiteaPullRequestPayload; record: PullRequestRecord } => entry.record !== undefined)
-      .filter((entry) => isPullRequestAssignedToUser(entry.pullRequest, currentUserResult.login ?? ""))
-      .map((entry) => entry.record);
-    const openedPullRequests = pullRequestListResult.payload
-      .map((pullRequest, index) => ({ pullRequest, record: pullRequestListResult.pullRequests?.[index] }))
-      .filter((entry): entry is { pullRequest: GiteaPullRequestPayload; record: PullRequestRecord } => entry.record !== undefined)
-      .filter((entry) => isPullRequestOpenedByUser(entry.pullRequest, currentUserResult.login ?? ""))
-      .map((entry) => entry.record);
+    const assignedPullRequests = collectMatchingPullRequests(
+      pullRequestListResult.payload,
+      pullRequestListResult.pullRequests,
+      (pullRequest) => isPullRequestAssignedToUser(pullRequest, currentUserResult.login ?? "")
+    );
+    const openedPullRequests = collectMatchingPullRequests(
+      pullRequestListResult.payload,
+      pullRequestListResult.pullRequests,
+      (pullRequest) => isPullRequestOpenedByUser(pullRequest, currentUserResult.login ?? "")
+    );
     const relevantPullRequestMap = new Map<number, PullRequestRecord>();
 
     for (const pullRequest of [...assignedPullRequests, ...openedPullRequests]) {
