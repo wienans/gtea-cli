@@ -84,6 +84,13 @@
         ]
       }
     ],
+    "issueViewOptions": [
+      {
+        "name": "--comments",
+        "summary": "Show the full issue conversation",
+        "status": "supported"
+      }
+    ],
     "issueCreateOptions": [
       {
         "name": "--title",
@@ -410,6 +417,7 @@
           "status": "supported",
           "flagProfiles": [
             "issueRepositoryTarget",
+            "issueViewOptions",
             "issueStructuredOutput"
           ],
           "outputProfiles": [

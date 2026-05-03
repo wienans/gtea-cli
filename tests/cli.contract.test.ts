@@ -59,6 +59,13 @@ test("issue help exposes the full manifest-backed issue tree", async () => {
   assert.match(result.stdout, /reopen/);
 });
 
+test("issue view help classifies --comments as supported", async () => {
+  const result = await executeCli(["issue", "view", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--comments[\s\S]*supported/i);
+});
+
 test("issue view reads a single issue from the selected Gitea host", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/issues/42") {
@@ -89,6 +96,236 @@ test("issue view reads a single issue from the selected Gitea host", async () =>
     assert.match(result.stdout, /open/i);
     assert.match(result.stdout, new RegExp(`http://127\\.0\\.0\\.1:${port}/octo/project/issues/42`));
     assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view shows a gh-shaped summary with newest comment preview", async () => {
+  let issueRequests = 0;
+  let commentRequests = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42") {
+      issueRequests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 42,
+          title: "Ship the richer issue summary",
+          state: "open",
+          body: "Issue body text for triage.",
+          user: {
+            login: "issue-author"
+          },
+          labels: [
+            { name: "enhancement" },
+            { name: "ready-for-agent" }
+          ],
+          comments: 3,
+          created_at: "2026-05-03T10:00:00Z"
+        })
+      );
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      commentRequests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 1,
+            body: "First comment",
+            user: { login: "first-commenter" },
+            created_at: "2026-05-03T10:10:00Z"
+          },
+          {
+            id: 2,
+            body: "Second comment",
+            user: { login: "second-commenter" },
+            created_at: "2026-05-03T10:20:00Z"
+          },
+          {
+            id: 3,
+            body: "Newest comment body",
+            user: { login: "latest-commenter" },
+            created_at: "2026-05-03T10:30:00Z"
+          }
+        ])
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["issue", "view", "42", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(issueRequests, 1);
+    assert.equal(commentRequests, 1);
+    assert.match(result.stdout, /Ship the richer issue summary/);
+    assert.match(result.stdout, /Issue body text for triage\./);
+    assert.match(result.stdout, /issue-author/);
+    assert.match(result.stdout, /Labels: enhancement, ready-for-agent/);
+    assert.match(result.stdout, /Not showing 2 comments/);
+    assert.match(result.stdout, /latest-commenter/);
+    assert.match(result.stdout, /Newest comment body/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view --comments shows the full issue conversation", async () => {
+  let commentRequests = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 42,
+          title: "Ship the richer issue summary",
+          state: "open",
+          body: "Issue body text for triage.",
+          user: {
+            login: "issue-author"
+          },
+          labels: [
+            { name: "enhancement" }
+          ],
+          comments: 2
+        })
+      );
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      commentRequests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 1,
+            body: "First visible comment",
+            user: { login: "first-commenter" }
+          },
+          {
+            id: 2,
+            body: "Second visible comment",
+            user: { login: "second-commenter" }
+          }
+        ])
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--comments"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(commentRequests, 1);
+    assert.match(result.stdout, /First visible comment/);
+    assert.match(result.stdout, /Second visible comment/);
+    assert.doesNotMatch(result.stdout, /Not showing/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view --comments surfaces authentication failures from the discussion read path", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 42,
+          title: "Ship the richer issue summary",
+          state: "open",
+          comments: 1
+        })
+      );
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--comments"
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Authentication failed while reading issue #42/i);
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => {
