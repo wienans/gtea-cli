@@ -142,3 +142,4 @@ _Avoid_: unit tests only, informal manual checks
 - The first release should prove breadth before depth; resolved: the initial delivery is a **Broad-First Milestone**.
 - Command-level support alone is too vague for script compatibility; resolved: the project uses a **Fine-Grained Support Manifest**.
 - Compatibility needs executable proof, not just intentions; resolved: the project uses a **Compatibility Harness** with golden comparisons and disposable Gitea tests.
+- "full interface" was ambiguous between broad compatibility and full `gh` parity; resolved: `gtea` broadens the `gh`-shaped surface only where Gitea has a **Semantic Match**, and keeps the rest explicit in the **Compatibility Matrix**.
