@@ -1,0 +1,648 @@
+{
+  "cliName": "gtea",
+  "summary": "Gitea CLI compatible with GitHub CLI",
+  "milestone": "Broad-First Milestone",
+  "supportBaseline": "1.25.x",
+  "flagProfiles": {
+    "repositoryTarget": [
+      {
+        "name": "--repo",
+        "aliases": [
+          "-R"
+        ],
+        "summary": "Select the Repository Context explicitly",
+        "status": "unsupported"
+      }
+    ],
+    "structuredOutput": [
+      {
+        "name": "--json",
+        "summary": "Format output as JSON",
+        "status": "unsupported"
+      },
+      {
+        "name": "--jq",
+        "summary": "Filter JSON output with jq syntax",
+        "status": "unsupported",
+        "requires": [
+          "--json"
+        ]
+      },
+      {
+        "name": "--template",
+        "summary": "Format JSON output with a Go template",
+        "status": "unsupported",
+        "requires": [
+          "--json"
+        ]
+      }
+    ],
+    "browseOptions": [
+      {
+        "name": "--repo",
+        "aliases": [
+          "-R"
+        ],
+        "summary": "Select the Repository Context explicitly",
+        "status": "unsupported"
+      },
+      {
+        "name": "--no-browser",
+        "summary": "Print the synthesized URL instead of opening a browser",
+        "status": "unsupported"
+      }
+    ],
+    "authHost": [
+      {
+        "name": "--hostname",
+        "summary": "Select the target Gitea Host",
+        "status": "unsupported"
+      }
+    ],
+    "authTokenInput": [
+      {
+        "name": "--with-token",
+        "summary": "Read a Personal Access Token from standard input",
+        "status": "unsupported"
+      }
+    ],
+    "authStatusOptions": [
+      {
+        "name": "--show-token",
+        "summary": "Include token details in status output",
+        "status": "unsupported"
+      }
+    ]
+  },
+  "outputProfiles": {
+    "issueRead": [
+      {
+        "name": "number",
+        "summary": "Issue number",
+        "status": "unsupported"
+      },
+      {
+        "name": "title",
+        "summary": "Issue title",
+        "status": "unsupported"
+      },
+      {
+        "name": "state",
+        "summary": "Issue state",
+        "status": "unsupported"
+      },
+      {
+        "name": "url",
+        "summary": "Issue web URL",
+        "status": "unsupported"
+      }
+    ],
+    "prRead": [
+      {
+        "name": "number",
+        "summary": "Pull request number",
+        "status": "unsupported"
+      },
+      {
+        "name": "title",
+        "summary": "Pull request title",
+        "status": "unsupported"
+      },
+      {
+        "name": "state",
+        "summary": "Pull request state",
+        "status": "unsupported"
+      },
+      {
+        "name": "headRefName",
+        "summary": "Source branch name",
+        "status": "unsupported"
+      },
+      {
+        "name": "baseRefName",
+        "summary": "Target branch name",
+        "status": "unsupported"
+      },
+      {
+        "name": "url",
+        "summary": "Pull request web URL",
+        "status": "unsupported"
+      }
+    ],
+    "releaseRead": [
+      {
+        "name": "tagName",
+        "summary": "Release tag name",
+        "status": "unsupported"
+      },
+      {
+        "name": "name",
+        "summary": "Release title",
+        "status": "unsupported"
+      },
+      {
+        "name": "isDraft",
+        "summary": "Whether the release is a draft",
+        "status": "unsupported"
+      },
+      {
+        "name": "isPrerelease",
+        "summary": "Whether the release is a prerelease",
+        "status": "unsupported"
+      },
+      {
+        "name": "url",
+        "summary": "Release web URL",
+        "status": "unsupported"
+      }
+    ],
+    "repoRead": [
+      {
+        "name": "name",
+        "summary": "Repository name",
+        "status": "unsupported"
+      },
+      {
+        "name": "owner",
+        "summary": "Repository owner",
+        "status": "unsupported"
+      },
+      {
+        "name": "visibility",
+        "summary": "Repository visibility",
+        "status": "unsupported"
+      },
+      {
+        "name": "url",
+        "summary": "Repository web URL",
+        "status": "unsupported"
+      }
+    ]
+  },
+  "children": [
+    {
+      "kind": "group",
+      "name": "auth",
+      "summary": "Authenticate with Gitea Hosts",
+      "status": "supported",
+      "children": [
+        {
+          "kind": "command",
+          "name": "login",
+          "summary": "Authenticate with a Gitea Host",
+          "status": "unsupported",
+          "reason": "Pending the multi-host auth slice (#3).",
+          "flagProfiles": [
+            "authHost",
+            "authTokenInput"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "status",
+          "summary": "Show the active host credential",
+          "status": "unsupported",
+          "reason": "Pending the multi-host auth slice (#3).",
+          "flagProfiles": [
+            "authHost",
+            "authStatusOptions"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "token",
+          "summary": "Print the active token",
+          "status": "unsupported",
+          "reason": "Pending the multi-host auth slice (#3).",
+          "flagProfiles": [
+            "authHost"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "switch",
+          "summary": "Switch the active Gitea Host",
+          "status": "unsupported",
+          "reason": "Pending the multi-host auth slice (#3).",
+          "flagProfiles": [
+            "authHost"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "logout",
+          "summary": "Remove the active host credential",
+          "status": "unsupported",
+          "reason": "Pending the multi-host auth slice (#3).",
+          "flagProfiles": [
+            "authHost"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "refresh",
+          "summary": "Refresh the active host credential",
+          "status": "unsupported",
+          "reason": "Pending the multi-host auth slice (#3).",
+          "flagProfiles": [
+            "authHost"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "setup-git",
+          "summary": "Configure Git to use the active credential",
+          "status": "unsupported",
+          "reason": "Pending the multi-host auth slice (#3).",
+          "flagProfiles": [
+            "authHost"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "command",
+      "name": "browse",
+      "summary": "Open repository routes in the browser",
+      "status": "unsupported",
+      "reason": "Pending Repository Context resolution and browse routing (#4).",
+      "flagProfiles": [
+        "browseOptions"
+      ]
+    },
+    {
+      "kind": "group",
+      "name": "issue",
+      "summary": "Work with issues",
+      "status": "supported",
+      "children": [
+        {
+          "kind": "command",
+          "name": "list",
+          "summary": "List issues",
+          "status": "unsupported",
+          "reason": "Pending the issue read slice (#5).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "issueRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "view",
+          "summary": "View an issue",
+          "status": "unsupported",
+          "reason": "Pending the issue read slice (#5).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "issueRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "status",
+          "summary": "Show issue status for the current user",
+          "status": "unsupported",
+          "reason": "Pending the issue read slice (#5).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "issueRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "create",
+          "summary": "Create an issue",
+          "status": "unsupported",
+          "reason": "Pending the issue maintenance slice (#6).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "comment",
+          "summary": "Add a comment to an issue",
+          "status": "unsupported",
+          "reason": "Pending the issue maintenance slice (#6).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "edit",
+          "summary": "Edit an issue",
+          "status": "unsupported",
+          "reason": "Pending the issue maintenance slice (#6).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "close",
+          "summary": "Close an issue",
+          "status": "unsupported",
+          "reason": "Pending the issue maintenance slice (#6).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "reopen",
+          "summary": "Reopen an issue",
+          "status": "unsupported",
+          "reason": "Pending the issue maintenance slice (#6).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "group",
+      "name": "pr",
+      "summary": "Work with pull requests",
+      "status": "supported",
+      "children": [
+        {
+          "kind": "command",
+          "name": "list",
+          "summary": "List pull requests",
+          "status": "unsupported",
+          "reason": "Pending the pull request read slice (#7).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "prRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "view",
+          "summary": "View a pull request",
+          "status": "unsupported",
+          "reason": "Pending the pull request read slice (#7).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "prRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "status",
+          "summary": "Show pull request status for the current user",
+          "status": "unsupported",
+          "reason": "Pending the pull request read slice (#7).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "prRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "diff",
+          "summary": "Show a pull request diff",
+          "status": "unsupported",
+          "reason": "Pending the pull request read slice (#7).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "checks",
+          "summary": "Show status checks for a pull request",
+          "status": "unsupported",
+          "reason": "Pending the pull request read slice (#7).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "prRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "checkout",
+          "summary": "Check out a pull request locally",
+          "status": "unsupported",
+          "reason": "Pending the pull request read slice (#7).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "create",
+          "summary": "Create a pull request",
+          "status": "unsupported",
+          "reason": "Pending the pull request write slice (#8).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "comment",
+          "summary": "Add a comment to a pull request",
+          "status": "unsupported",
+          "reason": "Pending the pull request write slice (#8).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "review",
+          "summary": "Submit a review on a pull request",
+          "status": "unsupported",
+          "reason": "Pending the pull request write slice (#8).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "merge",
+          "summary": "Merge a pull request",
+          "status": "unsupported",
+          "reason": "Pending the pull request write slice (#8).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "group",
+      "name": "release",
+      "summary": "Work with releases",
+      "status": "supported",
+      "children": [
+        {
+          "kind": "command",
+          "name": "list",
+          "summary": "List releases",
+          "status": "unsupported",
+          "reason": "Pending the release management slice (#9).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "releaseRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "view",
+          "summary": "View a release",
+          "status": "unsupported",
+          "reason": "Pending the release management slice (#9).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "releaseRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "create",
+          "summary": "Create a release",
+          "status": "unsupported",
+          "reason": "Pending the release management slice (#9).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "edit",
+          "summary": "Edit a release",
+          "status": "unsupported",
+          "reason": "Pending the release management slice (#9).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "delete",
+          "summary": "Delete a release",
+          "status": "unsupported",
+          "reason": "Pending the release management slice (#9).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "upload",
+          "summary": "Upload an asset to a release",
+          "status": "unsupported",
+          "reason": "Pending the release management slice (#9).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "download",
+          "summary": "Download a release asset",
+          "status": "unsupported",
+          "reason": "Pending the release management slice (#9).",
+          "flagProfiles": [
+            "repositoryTarget"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "group",
+      "name": "repo",
+      "summary": "Work with repositories",
+      "status": "supported",
+      "children": [
+        {
+          "kind": "command",
+          "name": "view",
+          "summary": "View a repository",
+          "status": "unsupported",
+          "reason": "Pending the repository read slice (#10).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "repoRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "list",
+          "summary": "List repositories",
+          "status": "unsupported",
+          "reason": "Pending the repository read slice (#10).",
+          "flagProfiles": [
+            "repositoryTarget",
+            "structuredOutput"
+          ],
+          "outputProfiles": [
+            "repoRead"
+          ]
+        },
+        {
+          "kind": "command",
+          "name": "clone",
+          "summary": "Clone a repository",
+          "status": "unsupported",
+          "reason": "Pending the repository read slice (#10)."
+        },
+        {
+          "kind": "command",
+          "name": "create",
+          "summary": "Create a repository",
+          "status": "unsupported",
+          "reason": "Pending the repository administration slice (#11)."
+        },
+        {
+          "kind": "command",
+          "name": "fork",
+          "summary": "Fork a repository",
+          "status": "unsupported",
+          "reason": "Pending the repository administration slice (#11)."
+        },
+        {
+          "kind": "command",
+          "name": "rename",
+          "summary": "Rename a repository",
+          "status": "unsupported",
+          "reason": "Pending the repository administration slice (#11)."
+        }
+      ]
+    }
+  ]
+}
