@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,8 +11,17 @@ import { fileURLToPath } from "node:url";
 import { executeCli } from "../src/cli.js";
 import { collectManifestPaths, supportManifest, validateSupportManifest } from "../src/support-manifest.js";
 
-test("root help shows the broad-first command groups", () => {
-  const result = executeCli(["--help"]);
+function getServerPort(server: ReturnType<typeof createServer>): number {
+  const address = server.address();
+
+  assert.notEqual(address, null);
+  assert.equal(typeof address, "object");
+
+  return (address as AddressInfo).port;
+}
+
+test("root help shows the broad-first command groups", async () => {
+  const result = await executeCli(["--help"]);
 
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /\bauth\b/);
@@ -21,16 +32,21 @@ test("root help shows the broad-first command groups", () => {
   assert.match(result.stdout, /\brepo\b/);
 });
 
-test("issue list fails as an explicit unsupported command", () => {
-  const result = executeCli(["issue", "list"]);
+test("issue list requires a Repository Context when no repo is provided", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "gtea-issue-context-"));
 
-  assert.equal(result.exitCode, 1);
-  assert.match(result.stderr, /gtea issue list is currently unsupported/i);
-  assert.match(result.stderr, /pending the issue read slice/i);
+  try {
+    const result = await executeCli(["issue", "list"], { cwd });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /No Repository Context selected/i);
+  } finally {
+    rmSync(cwd, { force: true, recursive: true });
+  }
 });
 
-test("issue help exposes the full manifest-backed issue tree", () => {
-  const result = executeCli(["issue", "--help"]);
+test("issue help exposes the full manifest-backed issue tree", async () => {
+  const result = await executeCli(["issue", "--help"]);
 
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /list/);
@@ -43,8 +59,344 @@ test("issue help exposes the full manifest-backed issue tree", () => {
   assert.match(result.stdout, /reopen/);
 });
 
-test("browse help shows the supported routing flags", () => {
-  const result = executeCli(["browse", "--help"]);
+test("issue view reads a single issue from the selected Gitea host", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the issue read slice",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["issue", "view", "42", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Ship the issue read slice/);
+    assert.match(result.stdout, /open/i);
+    assert.match(result.stdout, new RegExp(`http://127\\.0\\.0\\.1:${port}/octo/project/issues/42`));
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue list reads repository issues from the selected Gitea host", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=open") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          number: 7,
+          title: "Validate repository context reuse",
+          state: "open"
+        },
+        {
+          number: 12,
+          title: "Document the issue read contract",
+          state: "open"
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["issue", "list", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /#7/);
+    assert.match(result.stdout, /Validate repository context reuse/);
+    assert.match(result.stdout, /#12/);
+    assert.match(result.stdout, /open/i);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view supports manifest-backed json output fields", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the issue read slice",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "number,title,state,url"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      number: 42,
+      title: "Ship the issue read slice",
+      state: "open",
+      url: `http://127.0.0.1:${port}/octo/project/issues/42`
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view supports jq filtering on json output", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the issue read slice",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "number,title,state,url",
+      "--jq",
+      ".number"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "42\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view supports template formatting on json output", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the issue read slice",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "number,title,state,url",
+      "--template",
+      "{{.title}} (#{{.number}})"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "Ship the issue read slice (#42)\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue status reports relevant open issues for the authenticated user", async () => {
+  const server = createServer((request, response) => {
+    if (request.headers.authorization !== "token status-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.url === "/api/v1/user") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ login: "octocat" }));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues?state=open") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            number: 7,
+            title: "Validate repository context reuse",
+            state: "open",
+            assignees: [{ login: "octocat" }],
+            user: { login: "teammate" }
+          },
+          {
+            number: 12,
+            title: "Document the issue read contract",
+            state: "open",
+            assignees: [],
+            user: { login: "octocat" }
+          },
+          {
+            number: 21,
+            title: "Unrelated issue",
+            state: "open",
+            assignees: [{ login: "someone-else" }],
+            user: { login: "someone-else" }
+          }
+        ])
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["issue", "status", "-R", `127.0.0.1:${port}/octo/project`], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "status-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Assigned to you/);
+    assert.match(result.stdout, /Validate repository context reuse/);
+    assert.match(result.stdout, /Opened by you/);
+    assert.match(result.stdout, /Document the issue read contract/);
+    assert.doesNotMatch(result.stdout, /Unrelated issue/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("browse help shows the supported routing flags", async () => {
+  const result = await executeCli(["browse", "--help"]);
 
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /Open repository routes in the browser/);
@@ -57,7 +409,7 @@ test("browse help shows the supported routing flags", () => {
   assert.doesNotMatch(result.stdout, /Pending Repository Context resolution/i);
 });
 
-test("browse --no-browser uses the active host when -R omits it", () => {
+test("browse --no-browser uses the active host when -R omits it", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-browse-"));
 
   try {
@@ -67,14 +419,14 @@ test("browse --no-browser uses the active host when -R omits it", () => {
     };
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "browse.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "browse.example.com", "--with-token"], {
         env,
         stdin: "browse-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
-    const result = executeCli(["browse", "--no-browser", "-R", "octo/project"], { env });
+    const result = await executeCli(["browse", "--no-browser", "-R", "octo/project"], { env });
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "https://browse.example.com/octo/project\n");
@@ -84,7 +436,7 @@ test("browse --no-browser uses the active host when -R omits it", () => {
   }
 });
 
-test("browse --no-browser infers the repository from the current git remote", () => {
+test("browse --no-browser infers the repository from the current git remote", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "gtea-browse-repo-"));
 
   try {
@@ -102,7 +454,7 @@ test("browse --no-browser infers the repository from the current git remote", ()
 
     assert.equal(remoteResult.status, 0, remoteResult.stderr);
 
-    const result = executeCli(["browse", "--no-browser"], { cwd: repoRoot });
+    const result = await executeCli(["browse", "--no-browser"], { cwd: repoRoot });
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "https://gitea.example.com/octo/project\n");
@@ -112,7 +464,7 @@ test("browse --no-browser infers the repository from the current git remote", ()
   }
 });
 
-test("browse synthesizes deterministic routes for issues, pull requests, commits, files, and browse sections", () => {
+test("browse synthesizes deterministic routes for issues, pull requests, commits, files, and browse sections", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "gtea-browse-routes-"));
 
   try {
@@ -208,7 +560,7 @@ test("browse synthesizes deterministic routes for issues, pull requests, commits
     ];
 
     for (const browseCase of cases) {
-      const result = executeCli(browseCase.args, { cwd: repoRoot });
+      const result = await executeCli(browseCase.args, { cwd: repoRoot });
 
       assert.equal(result.exitCode, 0, `expected success for ${browseCase.args.join(" ")}`);
       assert.equal(result.stdout, `${browseCase.expectedUrl}\n`);
@@ -219,7 +571,7 @@ test("browse synthesizes deterministic routes for issues, pull requests, commits
   }
 });
 
-test("browse honors a host-qualified -R target over the stored active host", () => {
+test("browse honors a host-qualified -R target over the stored active host", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-browse-host-"));
 
   try {
@@ -229,14 +581,14 @@ test("browse honors a host-qualified -R target over the stored active host", () 
     };
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "stored.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "stored.example.com", "--with-token"], {
         env,
         stdin: "stored-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
-    const result = executeCli(["browse", "--no-browser", "-R", "alt.example.com/octo/project"], { env });
+    const result = await executeCli(["browse", "--no-browser", "-R", "alt.example.com/octo/project"], { env });
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "https://alt.example.com/octo/project\n");
@@ -246,14 +598,14 @@ test("browse honors a host-qualified -R target over the stored active host", () 
   }
 });
 
-test("browse rejects github.com as a non-eligible host", () => {
-  const result = executeCli(["browse", "--no-browser", "-R", "github.com/octo/project"]);
+test("browse rejects github.com as a non-eligible host", async () => {
+  const result = await executeCli(["browse", "--no-browser", "-R", "github.com/octo/project"]);
 
   assert.equal(result.exitCode, 1);
   assert.match(result.stderr, /github\.com is not an Eligible Host/i);
 });
 
-test("auth login persists a PAT and status reports the active host", () => {
+test("auth login persists a PAT and status reports the active host", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -262,7 +614,7 @@ test("auth login persists a PAT and status reports the active host", () => {
       XDG_CONFIG_HOME: configRoot
     };
 
-    const loginResult = executeCli(["auth", "login", "--hostname", "gitea.example.com", "--with-token"], {
+    const loginResult = await executeCli(["auth", "login", "--hostname", "gitea.example.com", "--with-token"], {
       env,
       stdin: "pat-example\n"
     });
@@ -270,7 +622,7 @@ test("auth login persists a PAT and status reports the active host", () => {
     assert.equal(loginResult.exitCode, 0);
     assert.match(loginResult.stdout, /Logged in to gitea\.example\.com/i);
 
-    const statusResult = executeCli(["auth", "status"], { env });
+    const statusResult = await executeCli(["auth", "status"], { env });
 
     assert.equal(statusResult.exitCode, 0);
     assert.match(statusResult.stdout, /Active host:\s+gitea\.example\.com/i);
@@ -280,7 +632,7 @@ test("auth login persists a PAT and status reports the active host", () => {
   }
 });
 
-test("auth login reads a PAT from real stdin in the shell entrypoint", () => {
+test("auth login reads a PAT from real stdin in the shell entrypoint", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -298,7 +650,7 @@ test("auth login reads a PAT from real stdin in the shell entrypoint", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Logged in to stdin\.example\.com/i);
 
-    const statusResult = executeCli(["auth", "status"], {
+    const statusResult = await executeCli(["auth", "status"], {
       env: {
         HOME: configRoot,
         XDG_CONFIG_HOME: configRoot
@@ -312,7 +664,7 @@ test("auth login reads a PAT from real stdin in the shell entrypoint", () => {
   }
 });
 
-test("auth token prefers GTEA compatibility variables over GH and stored config", () => {
+test("auth token prefers GTEA compatibility variables over GH and stored config", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -321,14 +673,14 @@ test("auth token prefers GTEA compatibility variables over GH and stored config"
       XDG_CONFIG_HOME: configRoot
     };
 
-    const loginResult = executeCli(["auth", "login", "--hostname", "stored.example.com", "--with-token"], {
+    const loginResult = await executeCli(["auth", "login", "--hostname", "stored.example.com", "--with-token"], {
       env: persistedEnv,
       stdin: "stored-token\n"
     });
 
     assert.equal(loginResult.exitCode, 0);
 
-    const tokenResult = executeCli(["auth", "token"], {
+    const tokenResult = await executeCli(["auth", "token"], {
       env: {
         ...persistedEnv,
         GH_HOST: "legacy.example.com",
@@ -345,7 +697,7 @@ test("auth token prefers GTEA compatibility variables over GH and stored config"
   }
 });
 
-test("auth switch and logout manage the active host across multiple stored hosts", () => {
+test("auth switch and logout manage the active host across multiple stored hosts", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -355,37 +707,37 @@ test("auth switch and logout manage the active host across multiple stored hosts
     };
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "first.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "first.example.com", "--with-token"], {
         env,
         stdin: "first-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "second.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "second.example.com", "--with-token"], {
         env,
         stdin: "second-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
-    const switchResult = executeCli(["auth", "switch", "--hostname", "first.example.com"], { env });
+    const switchResult = await executeCli(["auth", "switch", "--hostname", "first.example.com"], { env });
 
     assert.equal(switchResult.exitCode, 0);
     assert.match(switchResult.stdout, /Switched active host to first\.example\.com/i);
 
-    const switchedStatus = executeCli(["auth", "status"], { env });
+    const switchedStatus = await executeCli(["auth", "status"], { env });
 
     assert.equal(switchedStatus.exitCode, 0);
     assert.match(switchedStatus.stdout, /Active host:\s+first\.example\.com/i);
 
-    const logoutResult = executeCli(["auth", "logout", "--hostname", "first.example.com"], { env });
+    const logoutResult = await executeCli(["auth", "logout", "--hostname", "first.example.com"], { env });
 
     assert.equal(logoutResult.exitCode, 0);
     assert.match(logoutResult.stdout, /Removed the stored credential for first\.example\.com/i);
 
-    const fallbackStatus = executeCli(["auth", "status"], { env });
+    const fallbackStatus = await executeCli(["auth", "status"], { env });
 
     assert.equal(fallbackStatus.exitCode, 0);
     assert.match(fallbackStatus.stdout, /Active host:\s+second\.example\.com/i);
@@ -394,7 +746,7 @@ test("auth switch and logout manage the active host across multiple stored hosts
   }
 });
 
-test("auth refresh replaces the stored PAT for an existing host", () => {
+test("auth refresh replaces the stored PAT for an existing host", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -404,14 +756,14 @@ test("auth refresh replaces the stored PAT for an existing host", () => {
     };
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "refresh.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "refresh.example.com", "--with-token"], {
         env,
         stdin: "old-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
-    const refreshResult = executeCli(["auth", "refresh", "--hostname", "refresh.example.com", "--with-token"], {
+    const refreshResult = await executeCli(["auth", "refresh", "--hostname", "refresh.example.com", "--with-token"], {
       env,
       stdin: "new-token\n"
     });
@@ -419,7 +771,7 @@ test("auth refresh replaces the stored PAT for an existing host", () => {
     assert.equal(refreshResult.exitCode, 0);
     assert.match(refreshResult.stdout, /Refreshed the stored credential for refresh\.example\.com/i);
 
-    const tokenResult = executeCli(["auth", "token", "--hostname", "refresh.example.com"], { env });
+    const tokenResult = await executeCli(["auth", "token", "--hostname", "refresh.example.com"], { env });
 
     assert.equal(tokenResult.exitCode, 0);
     assert.equal(tokenResult.stdout, "new-token\n");
@@ -428,7 +780,7 @@ test("auth refresh replaces the stored PAT for an existing host", () => {
   }
 });
 
-test("auth setup-git configures git to use the gtea credential helper for the selected host", () => {
+test("auth setup-git configures git to use the gtea credential helper for the selected host", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -440,14 +792,14 @@ test("auth setup-git configures git to use the gtea credential helper for the se
     };
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "git.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "git.example.com", "--with-token"], {
         env,
         stdin: "git-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
-    const setupResult = executeCli(["auth", "setup-git", "--hostname", "git.example.com"], { env });
+    const setupResult = await executeCli(["auth", "setup-git", "--hostname", "git.example.com"], { env });
 
     assert.equal(setupResult.exitCode, 0);
     assert.match(setupResult.stdout, /Configured Git credential helper for git\.example\.com/i);
@@ -471,7 +823,7 @@ test("auth setup-git configures git to use the gtea credential helper for the se
   }
 });
 
-test("auth login rejects github.com as a non-eligible host", () => {
+test("auth login rejects github.com as a non-eligible host", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -480,7 +832,7 @@ test("auth login rejects github.com as a non-eligible host", () => {
       XDG_CONFIG_HOME: configRoot
     };
 
-    const result = executeCli(["auth", "login", "--hostname", "github.com", "--with-token"], {
+    const result = await executeCli(["auth", "login", "--hostname", "github.com", "--with-token"], {
       env,
       stdin: "pat-example\n"
     });
@@ -492,7 +844,7 @@ test("auth login rejects github.com as a non-eligible host", () => {
   }
 });
 
-test("auth status rejects an invalid explicit hostname instead of falling back to the active host", () => {
+test("auth status rejects an invalid explicit hostname instead of falling back to the active host", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -502,14 +854,14 @@ test("auth status rejects an invalid explicit hostname instead of falling back t
     };
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "valid.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "valid.example.com", "--with-token"], {
         env,
         stdin: "valid-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
-    const result = executeCli(["auth", "status", "--hostname", "not/a/host"], { env });
+    const result = await executeCli(["auth", "status", "--hostname", "not/a/host"], { env });
 
     assert.equal(result.exitCode, 1);
     assert.match(result.stderr, /Invalid value for --hostname: not\/a\/host/i);
@@ -518,7 +870,7 @@ test("auth status rejects an invalid explicit hostname instead of falling back t
   }
 });
 
-test("auth status rejects an invalid GTEA_HOST instead of falling back to stored config", () => {
+test("auth status rejects an invalid GTEA_HOST instead of falling back to stored config", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -528,14 +880,14 @@ test("auth status rejects an invalid GTEA_HOST instead of falling back to stored
     };
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "valid.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "valid.example.com", "--with-token"], {
         env: persistedEnv,
         stdin: "valid-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
-    const result = executeCli(["auth", "status"], {
+    const result = await executeCli(["auth", "status"], {
       env: {
         ...persistedEnv,
         GTEA_HOST: "not/a/host"
@@ -549,7 +901,7 @@ test("auth status rejects an invalid GTEA_HOST instead of falling back to stored
   }
 });
 
-test("auth git-credential returns oauth2 credentials for the configured host", () => {
+test("auth git-credential returns oauth2 credentials for the configured host", async () => {
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
@@ -559,14 +911,14 @@ test("auth git-credential returns oauth2 credentials for the configured host", (
     };
 
     assert.equal(
-      executeCli(["auth", "login", "--hostname", "helper.example.com", "--with-token"], {
+      (await executeCli(["auth", "login", "--hostname", "helper.example.com", "--with-token"], {
         env,
         stdin: "helper-token\n"
-      }).exitCode,
+      })).exitCode,
       0
     );
 
-    const result = executeCli(["auth", "git-credential", "--hostname", "helper.example.com", "get"], {
+    const result = await executeCli(["auth", "git-credential", "--hostname", "helper.example.com", "get"], {
       env,
       stdin: "protocol=https\nhost=helper.example.com\n\n"
     });
@@ -578,7 +930,7 @@ test("auth git-credential returns oauth2 credentials for the configured host", (
   }
 });
 
-test("support manifest validation and CLI surface stay synchronized", () => {
+test("support manifest validation and CLI surface stay synchronized", async () => {
   const manifestJson = JSON.parse(
     readFileSync(new URL("../support-manifest.json", import.meta.url), "utf8")
   ) as Parameters<typeof validateSupportManifest>[0];
@@ -587,13 +939,13 @@ test("support manifest validation and CLI surface stay synchronized", () => {
   assert.deepEqual(validationErrors, []);
 
   for (const entry of collectManifestPaths()) {
-    const helpResult = executeCli([...entry.path, "--help"]);
+    const helpResult = await executeCli([...entry.path, "--help"]);
 
     assert.equal(helpResult.exitCode, 0, `help failed for ${entry.path.join(" ")}`);
     assert.match(helpResult.stdout, new RegExp(entry.node.name));
 
     if (entry.node.kind === "command") {
-      const executeResult = executeCli(entry.path);
+      const executeResult = await executeCli(entry.path);
 
       if (entry.node.status === "unsupported") {
         assert.equal(executeResult.exitCode, 1, `expected explicit unsupported result for ${entry.path.join(" ")}`);

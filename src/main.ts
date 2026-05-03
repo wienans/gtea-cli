@@ -32,7 +32,7 @@ function readCommandStdin(args: string[]): string | undefined {
 
 const args = process.argv.slice(2);
 const stdin = readCommandStdin(args);
-const result = executeCli(args, stdin === undefined ? {} : { stdin });
+const result = await executeCli(args, stdin === undefined ? {} : { stdin });
 
 if (result.stdout.length > 0) {
   process.stdout.write(result.stdout);

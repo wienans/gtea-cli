@@ -1,6 +1,7 @@
 import { executeAuthCommand } from "./auth.js";
 import { executeBrowseCommand } from "./browse.js";
 import { CliExecutionContext, CliResult, resolveCliExecutionContext } from "./cli-runtime.js";
+import { executeIssueCommand } from "./issue.js";
 import { ManifestCommand, ManifestGroup, ManifestNode, supportManifest } from "./support-manifest.js";
 
 export type { CliExecutionContext, CliResult } from "./cli-runtime.js";
@@ -165,7 +166,7 @@ function renderUnsupported(path: string[], command: ManifestCommand): CliResult 
   };
 }
 
-export function executeCli(args: string[], context: CliExecutionContext = {}): CliResult {
+export async function executeCli(args: string[], context: CliExecutionContext = {}): Promise<CliResult> {
   const executionContext = resolveCliExecutionContext(context);
   const wantsHelp = args.includes("--help") || args.includes("-h");
 
@@ -180,6 +181,12 @@ export function executeCli(args: string[], context: CliExecutionContext = {}): C
 
     if (browseResult !== undefined) {
       return browseResult;
+    }
+
+    const issueResult = await executeIssueCommand(args, executionContext);
+
+    if (issueResult !== undefined) {
+      return issueResult;
     }
   }
 
