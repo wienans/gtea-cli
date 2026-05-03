@@ -14,11 +14,46 @@
         "status": "unsupported"
       }
     ],
+    "issueRepositoryTarget": [
+      {
+        "name": "--repo",
+        "aliases": [
+          "-R"
+        ],
+        "summary": "Select the Repository Context explicitly",
+        "status": "supported"
+      }
+    ],
     "structuredOutput": [
       {
         "name": "--json",
         "summary": "Format output as JSON",
         "status": "unsupported"
+      },
+      {
+        "name": "--jq",
+        "summary": "Filter JSON output with jq syntax",
+        "status": "emulated",
+        "reason": "Implements the repository read slice's supported jq field-path subset.",
+        "requires": [
+          "--json"
+        ]
+      },
+      {
+        "name": "--template",
+        "summary": "Format JSON output with a Go template",
+        "status": "emulated",
+        "reason": "Implements the repository read slice's supported field-interpolation template subset.",
+        "requires": [
+          "--json"
+        ]
+      }
+    ],
+    "issueStructuredOutput": [
+      {
+        "name": "--json",
+        "summary": "Format output as JSON",
+        "status": "supported"
       },
       {
         "name": "--jq",
@@ -103,22 +138,22 @@
       {
         "name": "number",
         "summary": "Issue number",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "title",
         "summary": "Issue title",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "state",
         "summary": "Issue state",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "url",
         "summary": "Issue web URL",
-        "status": "unsupported"
+        "status": "supported"
       }
     ],
     "prRead": [
@@ -297,11 +332,10 @@
           "kind": "command",
           "name": "list",
           "summary": "List issues",
-          "status": "unsupported",
-          "reason": "Pending the issue read slice (#5).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget",
-            "structuredOutput"
+            "issueRepositoryTarget",
+            "issueStructuredOutput"
           ],
           "outputProfiles": [
             "issueRead"
@@ -311,11 +345,10 @@
           "kind": "command",
           "name": "view",
           "summary": "View an issue",
-          "status": "unsupported",
-          "reason": "Pending the issue read slice (#5).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget",
-            "structuredOutput"
+            "issueRepositoryTarget",
+            "issueStructuredOutput"
           ],
           "outputProfiles": [
             "issueRead"
@@ -325,11 +358,11 @@
           "kind": "command",
           "name": "status",
           "summary": "Show issue status for the current user",
-          "status": "unsupported",
-          "reason": "Pending the issue read slice (#5).",
+          "status": "emulated",
+          "reason": "Approximates gh issue status by reporting repository-scoped issues assigned to or opened by the authenticated user.",
           "flagProfiles": [
-            "repositoryTarget",
-            "structuredOutput"
+            "issueRepositoryTarget",
+            "issueStructuredOutput"
           ],
           "outputProfiles": [
             "issueRead"

@@ -97,6 +97,13 @@ export function isEligibleHost(hostname: string): boolean {
   return !/(^|\.)github\.com$/i.test(hostnameWithoutPort);
 }
 
+export function buildHostBaseUrl(hostname: string): string {
+  const hostnameWithoutPort = hostname.split(":")[0] ?? hostname;
+  const protocol = /^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i.test(hostnameWithoutPort) ? "http" : "https";
+
+  return `${protocol}://${hostname}`;
+}
+
 export function buildProcessEnv(context: ResolvedCliExecutionContext): NodeJS.ProcessEnv {
   return {
     ...process.env,
