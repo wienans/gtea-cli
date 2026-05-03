@@ -926,12 +926,12 @@ async function readIssueComments(
   }
 }
 
-async function readRepositoryLabels(
+async function readIssueEditLookupPayload<T>(
   repository: RepositoryContext,
   issueNumber: number,
+  requestUrl: string,
   context: ResolvedCliExecutionContext
-): Promise<{ labels?: GiteaLabelPayload[]; error?: CliResult }> {
-  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels`;
+): Promise<{ payload: T } | { error: CliResult }> {
   const token = resolveOptionalToken(repository.hostname, context);
 
   try {
@@ -962,7 +962,7 @@ async function readRepositoryLabels(
     }
 
     return {
-      labels: await response.json() as GiteaLabelPayload[]
+      payload: await response.json() as T
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -977,55 +977,40 @@ async function readRepositoryLabels(
   }
 }
 
+async function readRepositoryLabels(
+  repository: RepositoryContext,
+  issueNumber: number,
+  context: ResolvedCliExecutionContext
+): Promise<{ labels?: GiteaLabelPayload[]; error?: CliResult }> {
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels`;
+  const result = await readIssueEditLookupPayload<GiteaLabelPayload[]>(
+    repository,
+    issueNumber,
+    requestUrl,
+    context
+  );
+
+  return "error" in result
+    ? { error: result.error }
+    : { labels: result.payload };
+}
+
 async function readRepositoryMilestones(
   repository: RepositoryContext,
   issueNumber: number,
   context: ResolvedCliExecutionContext
 ): Promise<{ milestones?: GiteaMilestonePayload[]; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/milestones?state=all`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const result = await readIssueEditLookupPayload<GiteaMilestonePayload[]>(
+    repository,
+    issueNumber,
+    requestUrl,
+    context
+  );
 
-  try {
-    const response = await fetch(requestUrl, {
-      headers: {
-        Authorization: `token ${token ?? ""}`
-      }
-    });
-
-    if (response.status === 401 || response.status === 403) {
-      return {
-        error: {
-          exitCode: 1,
-          stdout: "",
-          stderr: `Authentication failed while editing issue #${issueNumber} on ${repository.hostname}.\n`
-        }
-      };
-    }
-
-    if (!response.ok) {
-      return {
-        error: {
-          exitCode: 1,
-          stdout: "",
-          stderr: `Gitea returned ${response.status} while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
-        }
-      };
-    }
-
-    return {
-      milestones: await response.json() as GiteaMilestonePayload[]
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Failed to edit issue #${issueNumber} on ${repository.hostname}: ${message}\n`
-      }
-    };
-  }
+  return "error" in result
+    ? { error: result.error }
+    : { milestones: result.payload };
 }
 
 async function readGiteaErrorMessage(response: Response): Promise<string | undefined> {
