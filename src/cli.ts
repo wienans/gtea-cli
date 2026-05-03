@@ -1,4 +1,5 @@
 import { executeAuthCommand } from "./auth.js";
+import { executeBrowseCommand } from "./browse.js";
 import { CliExecutionContext, CliResult, resolveCliExecutionContext } from "./cli-runtime.js";
 import { ManifestCommand, ManifestGroup, ManifestNode, supportManifest } from "./support-manifest.js";
 
@@ -173,6 +174,12 @@ export function executeCli(args: string[], context: CliExecutionContext = {}): C
 
     if (authResult !== undefined) {
       return authResult;
+    }
+
+    const browseResult = executeBrowseCommand(args, executionContext);
+
+    if (browseResult !== undefined) {
+      return browseResult;
     }
   }
 
