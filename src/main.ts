@@ -7,15 +7,31 @@ import { executeCli } from "./cli.js";
 function commandReadsStdin(args: string[]): boolean {
   const [group, subcommand] = args;
 
-  if (group !== "auth") {
+  if (group === "auth") {
+    if ((subcommand === "login" || subcommand === "refresh") && args.includes("--with-token")) {
+      return true;
+    }
+
+    return subcommand === "git-credential";
+  }
+
+  if (group !== "issue" || subcommand !== "edit") {
     return false;
   }
 
-  if ((subcommand === "login" || subcommand === "refresh") && args.includes("--with-token")) {
-    return true;
+  for (let index = 2; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === "--body-file" && args[index + 1] === "-") {
+      return true;
+    }
+
+    if (token === "--body-file=-") {
+      return true;
+    }
   }
 
-  return subcommand === "git-credential";
+  return false;
 }
 
 function readCommandStdin(args: string[]): string | undefined {

@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import { buildHostBaseUrl } from "./host-config.js";
@@ -26,6 +28,13 @@ interface ParsedIssueMutationFlags {
   repository?: string;
   title?: string;
   body?: string;
+  bodyFile?: string;
+  addLabels: string[];
+  removeLabels: string[];
+  addAssignees: string[];
+  removeAssignees: string[];
+  milestone?: string;
+  removeMilestone?: boolean;
 }
 
 interface IssueRecord {
@@ -45,6 +54,16 @@ interface IssueCommentRecord {
   authorLogin?: string;
 }
 
+interface GiteaLabelPayload {
+  id?: number;
+  name?: string;
+}
+
+interface GiteaMilestonePayload {
+  id?: number;
+  title?: string;
+}
+
 interface GiteaIssuePayload {
   number?: number;
   title?: string;
@@ -54,13 +73,22 @@ interface GiteaIssuePayload {
   assignee?: { login?: string };
   assignees?: Array<{ login?: string }>;
   user?: { login?: string };
-  labels?: Array<{ name?: string }>;
+  labels?: GiteaLabelPayload[];
+  milestone?: GiteaMilestonePayload;
 }
 
 interface GiteaIssueCommentPayload {
   id?: number;
   body?: string;
   user?: { login?: string };
+}
+
+interface IssueUpdatePayload {
+  title?: string;
+  body?: string;
+  state?: "open" | "closed";
+  assignees?: string[];
+  milestone?: number;
 }
 
 const issueGroup = supportManifest.children.find(
@@ -82,7 +110,7 @@ function renderUnsupportedIssueFlag(subcommand: string, flag: string, reason: st
 function parseStringFlagValue(
   args: string[],
   index: number,
-  options: { long: string; short?: string }
+  options: { long: string; short?: string; allowDashValue?: boolean }
 ): { handled: boolean; nextIndex: number; value?: string; error?: CliResult } {
   const token = args[index];
   const longPrefix = `${options.long}=`;
@@ -105,7 +133,10 @@ function parseStringFlagValue(
 
   const rawValue = args[index + 1];
 
-  if (rawValue === undefined || rawValue.startsWith("-")) {
+  if (
+    rawValue === undefined
+    || (rawValue.startsWith("-") && !(options.allowDashValue === true && rawValue === "-"))
+  ) {
     return {
       handled: true,
       nextIndex: index,
@@ -122,6 +153,13 @@ function parseStringFlagValue(
     nextIndex: index + 1,
     value: rawValue
   };
+}
+
+function parseCsvValues(rawValue: string): string[] {
+  return rawValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
 }
 
 function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: CliResult } {
@@ -333,9 +371,14 @@ function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags;
 
 function parseIssueMutationFlags(
   args: string[],
-  options: { allowTitle: boolean; allowBody: boolean }
+  options: { allowTitle: boolean; allowBody: boolean; allowBodyFile: boolean }
 ): { flags: ParsedIssueMutationFlags; error?: CliResult } {
-  const flags: ParsedIssueMutationFlags = {};
+  const flags: ParsedIssueMutationFlags = {
+    addLabels: [],
+    removeLabels: [],
+    addAssignees: [],
+    removeAssignees: []
+  };
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
@@ -393,6 +436,169 @@ function parseIssueMutationFlags(
       continue;
     }
 
+    const bodyFileFlag = options.allowBodyFile
+      ? parseStringFlagValue(args, index, { long: "--body-file", allowDashValue: true })
+      : { handled: false, nextIndex: index };
+
+    if (bodyFileFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFileFlag.error
+      };
+    }
+
+    if (bodyFileFlag.handled && bodyFileFlag.value !== undefined) {
+      flags.bodyFile = bodyFileFlag.value;
+      index = bodyFileFlag.nextIndex;
+      continue;
+    }
+
+    const addLabelFlag = parseStringFlagValue(args, index, { long: "--add-label" });
+
+    if (addLabelFlag.error !== undefined) {
+      return {
+        flags,
+        error: addLabelFlag.error
+      };
+    }
+
+    if (addLabelFlag.handled && addLabelFlag.value !== undefined) {
+      flags.addLabels.push(...parseCsvValues(addLabelFlag.value));
+      index = addLabelFlag.nextIndex;
+      continue;
+    }
+
+    const removeLabelFlag = parseStringFlagValue(args, index, { long: "--remove-label" });
+
+    if (removeLabelFlag.error !== undefined) {
+      return {
+        flags,
+        error: removeLabelFlag.error
+      };
+    }
+
+    if (removeLabelFlag.handled && removeLabelFlag.value !== undefined) {
+      flags.removeLabels.push(...parseCsvValues(removeLabelFlag.value));
+      index = removeLabelFlag.nextIndex;
+      continue;
+    }
+
+    const addAssigneeFlag = parseStringFlagValue(args, index, { long: "--add-assignee" });
+
+    if (addAssigneeFlag.error !== undefined) {
+      return {
+        flags,
+        error: addAssigneeFlag.error
+      };
+    }
+
+    if (addAssigneeFlag.handled && addAssigneeFlag.value !== undefined) {
+      const assigneeValues = parseCsvValues(addAssigneeFlag.value);
+
+      if (assigneeValues.includes("@copilot")) {
+        return {
+          flags,
+          error: renderUnsupportedIssueFlag(
+            "edit",
+            "--add-assignee",
+            "Copilot assignee aliases are not supported on Gitea hosts."
+          )
+        };
+      }
+
+      flags.addAssignees.push(...assigneeValues);
+      index = addAssigneeFlag.nextIndex;
+      continue;
+    }
+
+    const removeAssigneeFlag = parseStringFlagValue(args, index, { long: "--remove-assignee" });
+
+    if (removeAssigneeFlag.error !== undefined) {
+      return {
+        flags,
+        error: removeAssigneeFlag.error
+      };
+    }
+
+    if (removeAssigneeFlag.handled && removeAssigneeFlag.value !== undefined) {
+      const assigneeValues = parseCsvValues(removeAssigneeFlag.value);
+
+      if (assigneeValues.includes("@copilot")) {
+        return {
+          flags,
+          error: renderUnsupportedIssueFlag(
+            "edit",
+            "--remove-assignee",
+            "Copilot assignee aliases are not supported on Gitea hosts."
+          )
+        };
+      }
+
+      flags.removeAssignees.push(...assigneeValues);
+      index = removeAssigneeFlag.nextIndex;
+      continue;
+    }
+
+    const milestoneFlag = parseStringFlagValue(args, index, { long: "--milestone" });
+
+    if (milestoneFlag.error !== undefined) {
+      return {
+        flags,
+        error: milestoneFlag.error
+      };
+    }
+
+    if (milestoneFlag.handled && milestoneFlag.value !== undefined) {
+      flags.milestone = milestoneFlag.value;
+      index = milestoneFlag.nextIndex;
+      continue;
+    }
+
+    if (token === "--remove-milestone") {
+      flags.removeMilestone = true;
+      continue;
+    }
+
+    const addProjectFlag = parseStringFlagValue(args, index, { long: "--add-project" });
+
+    if (addProjectFlag.error !== undefined) {
+      return {
+        flags,
+        error: addProjectFlag.error
+      };
+    }
+
+    if (addProjectFlag.handled) {
+      return {
+        flags,
+        error: renderUnsupportedIssueFlag(
+          "edit",
+          "--add-project",
+          "Project edits are not part of the supported issue maintenance slice."
+        )
+      };
+    }
+
+    const removeProjectFlag = parseStringFlagValue(args, index, { long: "--remove-project" });
+
+    if (removeProjectFlag.error !== undefined) {
+      return {
+        flags,
+        error: removeProjectFlag.error
+      };
+    }
+
+    if (removeProjectFlag.handled) {
+      return {
+        flags,
+        error: renderUnsupportedIssueFlag(
+          "edit",
+          "--remove-project",
+          "Project edits are not part of the supported issue maintenance slice."
+        )
+      };
+    }
+
     if (token.startsWith("-")) {
       return {
         flags,
@@ -432,6 +638,116 @@ function parseIssueMutationFlags(
   return { flags };
 }
 
+function resolveIssueBodyInput(
+  flags: ParsedIssueMutationFlags,
+  context: ResolvedCliExecutionContext
+): { body?: string; error?: CliResult } {
+  if (flags.body !== undefined && flags.bodyFile !== undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Specify only one of --body or --body-file.\n"
+      }
+    };
+  }
+
+  if (flags.bodyFile === undefined) {
+    return {
+      ...(flags.body === undefined ? {} : { body: flags.body })
+    };
+  }
+
+  if (flags.bodyFile === "-") {
+    return {
+      body: context.stdin
+    };
+  }
+
+  try {
+    return {
+      body: readFileSync(resolvePath(context.cwd, flags.bodyFile), "utf8")
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read issue body from ${flags.bodyFile}: ${message}\n`
+      }
+    };
+  }
+}
+
+function hasIssueMetadataChanges(flags: ParsedIssueMutationFlags): boolean {
+  return (
+    flags.addLabels.length > 0
+    || flags.removeLabels.length > 0
+    || flags.addAssignees.length > 0
+    || flags.removeAssignees.length > 0
+    || flags.milestone !== undefined
+    || flags.removeMilestone === true
+  );
+}
+
+function uniqueValues(values: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    unique.push(value);
+  }
+
+  return unique;
+}
+
+function applyStringListMutations(currentValues: string[], addValues: string[], removeValues: string[]): string[] {
+  const removeSet = new Set(removeValues);
+  const nextValues = currentValues.filter((value) => !removeSet.has(value));
+
+  for (const value of addValues) {
+    if (!nextValues.includes(value)) {
+      nextValues.push(value);
+    }
+  }
+
+  return uniqueValues(nextValues);
+}
+
+function currentIssueAssignees(issue: GiteaIssuePayload): string[] {
+  const assigneeLogins = [issue.assignee?.login, ...(issue.assignees ?? []).map((assignee) => assignee.login)]
+    .filter((login): login is string => typeof login === "string" && login.length > 0);
+
+  return uniqueValues(assigneeLogins);
+}
+
+function currentIssueLabelNames(issue: GiteaIssuePayload): string[] {
+  return uniqueValues(
+    (issue.labels ?? [])
+      .map((label) => label.name)
+      .filter((label): label is string => typeof label === "string" && label.length > 0)
+  );
+}
+
+function resolveAssigneeAliases(values: string[], currentUserLogin: string | undefined): string[] {
+  return uniqueValues(
+    values.map((value) => {
+      if (value === "@me") {
+        return currentUserLogin ?? value;
+      }
+
+      return value;
+    })
+  );
+}
+
 function buildIssueUrl(repository: RepositoryContext, issueNumber: number): string {
   return `${buildHostBaseUrl(repository.hostname)}/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}`;
 }
@@ -464,6 +780,28 @@ async function readIssue(
   issueNumber: number,
   context: ResolvedCliExecutionContext
 ): Promise<{ issue?: IssueRecord; error?: CliResult }> {
+  const issuePayloadResult = await readIssuePayload(repository, issueNumber, context);
+
+  if (issuePayloadResult.error !== undefined || issuePayloadResult.payload === undefined) {
+    return {
+      error: issuePayloadResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read issue #${issueNumber}.\n`
+      }
+    };
+  }
+
+  return {
+    issue: mapIssueRecord(repository, issuePayloadResult.payload, issueNumber)
+  };
+}
+
+async function readIssuePayload(
+  repository: RepositoryContext,
+  issueNumber: number,
+  context: ResolvedCliExecutionContext
+): Promise<{ payload?: GiteaIssuePayload; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}`;
   const token = resolveOptionalToken(repository.hostname, context);
 
@@ -504,7 +842,7 @@ async function readIssue(
     }
 
     return {
-      issue: mapIssueRecord(repository, await response.json() as GiteaIssuePayload, issueNumber)
+      payload: await response.json() as GiteaIssuePayload
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -586,6 +924,93 @@ async function readIssueComments(
       }
     };
   }
+}
+
+async function readIssueEditLookupPayload<T>(
+  repository: RepositoryContext,
+  issueNumber: number,
+  requestUrl: string,
+  context: ResolvedCliExecutionContext
+): Promise<{ payload: T } | { error: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  try {
+    const response = await fetch(requestUrl, {
+      headers: {
+        Authorization: `token ${token ?? ""}`
+      }
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while editing issue #${issueNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {
+      payload: await response.json() as T
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to edit issue #${issueNumber} on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function readRepositoryLabels(
+  repository: RepositoryContext,
+  issueNumber: number,
+  context: ResolvedCliExecutionContext
+): Promise<{ labels?: GiteaLabelPayload[]; error?: CliResult }> {
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels`;
+  const result = await readIssueEditLookupPayload<GiteaLabelPayload[]>(
+    repository,
+    issueNumber,
+    requestUrl,
+    context
+  );
+
+  return "error" in result
+    ? { error: result.error }
+    : { labels: result.payload };
+}
+
+async function readRepositoryMilestones(
+  repository: RepositoryContext,
+  issueNumber: number,
+  context: ResolvedCliExecutionContext
+): Promise<{ milestones?: GiteaMilestonePayload[]; error?: CliResult }> {
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/milestones?state=all`;
+  const result = await readIssueEditLookupPayload<GiteaMilestonePayload[]>(
+    repository,
+    issueNumber,
+    requestUrl,
+    context
+  );
+
+  return "error" in result
+    ? { error: result.error }
+    : { milestones: result.payload };
 }
 
 async function readGiteaErrorMessage(response: Response): Promise<string | undefined> {
@@ -769,7 +1194,7 @@ async function commentOnIssue(
 async function updateIssue(
   repository: RepositoryContext,
   issueNumber: number,
-  payload: { title?: string; body?: string; state?: "open" | "closed" },
+  payload: IssueUpdatePayload,
   context: ResolvedCliExecutionContext,
   commandName: "edit" | "close" | "reopen",
   actionLabel: string
@@ -858,6 +1283,251 @@ async function updateIssue(
   }
 }
 
+async function replaceIssueLabels(
+  repository: RepositoryContext,
+  issueNumber: number,
+  labelIds: number[],
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  if (token === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "gtea issue edit requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+      }
+    };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}/labels`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "PUT",
+      headers: {
+        Authorization: `token ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ labels: labelIds })
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while editing issue #${issueNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 404) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Issue #${issueNumber} was not found in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to edit issue #${issueNumber} on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function planIssueEditMutations(
+  repository: RepositoryContext,
+  issueNumber: number,
+  flags: ParsedIssueMutationFlags,
+  body: string | undefined,
+  context: ResolvedCliExecutionContext
+): Promise<{ patchPayload: IssueUpdatePayload; labelIds?: number[]; error?: CliResult }> {
+  if (flags.milestone !== undefined && flags.removeMilestone === true) {
+    return {
+      patchPayload: {},
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Specify only one of --milestone or --remove-milestone.\n"
+      }
+    };
+  }
+
+  const patchPayload: IssueUpdatePayload = {
+    ...(flags.title === undefined ? {} : { title: flags.title }),
+    ...(body === undefined ? {} : { body })
+  };
+
+  if (!hasIssueMetadataChanges(flags)) {
+    return { patchPayload };
+  }
+
+  const issuePayloadResult = await readIssuePayload(repository, issueNumber, context);
+
+  if (issuePayloadResult.error !== undefined || issuePayloadResult.payload === undefined) {
+    return {
+      patchPayload,
+      error: issuePayloadResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read issue #${issueNumber}.\n`
+      }
+    };
+  }
+
+  const currentIssue = issuePayloadResult.payload;
+
+  if (flags.addAssignees.length > 0 || flags.removeAssignees.length > 0) {
+    let currentUserLogin: string | undefined;
+
+    if (flags.addAssignees.includes("@me") || flags.removeAssignees.includes("@me")) {
+      const currentUserResult = await readCurrentUser(repository.hostname, context, "edit");
+
+      if (currentUserResult.error !== undefined || currentUserResult.login === undefined) {
+        return {
+          patchPayload,
+          error: currentUserResult.error ?? {
+            exitCode: 1,
+            stdout: "",
+            stderr: `Failed to resolve @me while editing issue #${issueNumber}.\n`
+          }
+        };
+      }
+
+      currentUserLogin = currentUserResult.login;
+    }
+
+    patchPayload.assignees = applyStringListMutations(
+      currentIssueAssignees(currentIssue),
+      resolveAssigneeAliases(flags.addAssignees, currentUserLogin),
+      resolveAssigneeAliases(flags.removeAssignees, currentUserLogin)
+    );
+  }
+
+  if (flags.milestone !== undefined) {
+    const milestoneResult = await readRepositoryMilestones(repository, issueNumber, context);
+
+    if (milestoneResult.error !== undefined || milestoneResult.milestones === undefined) {
+      return {
+        patchPayload,
+        error: milestoneResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Failed to resolve milestone while editing issue #${issueNumber}.\n`
+        }
+      };
+    }
+
+    const matchingMilestone = milestoneResult.milestones.find(
+      (milestone) => milestone.title === flags.milestone && typeof milestone.id === "number"
+    );
+
+    if (matchingMilestone?.id === undefined) {
+      return {
+        patchPayload,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Validation failed while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}: milestone \"${flags.milestone}\" was not found.\n`
+        }
+      };
+    }
+
+    patchPayload.milestone = matchingMilestone.id;
+  }
+
+  if (flags.removeMilestone === true) {
+    patchPayload.milestone = 0;
+  }
+
+  if (flags.addLabels.length === 0 && flags.removeLabels.length === 0) {
+    return { patchPayload };
+  }
+
+  const labelResult = await readRepositoryLabels(repository, issueNumber, context);
+
+  if (labelResult.error !== undefined || labelResult.labels === undefined) {
+    return {
+      patchPayload,
+      error: labelResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to resolve labels while editing issue #${issueNumber}.\n`
+      }
+    };
+  }
+
+  const finalLabelNames = applyStringListMutations(
+    currentIssueLabelNames(currentIssue),
+    flags.addLabels,
+    flags.removeLabels
+  );
+  const availableLabels = new Map(
+    labelResult.labels
+      .filter((label) => typeof label.name === "string" && label.name.length > 0 && typeof label.id === "number")
+      .map((label) => [label.name as string, label.id as number])
+  );
+  const labelIds: number[] = [];
+
+  for (const labelName of finalLabelNames) {
+    const labelId = availableLabels.get(labelName);
+
+    if (labelId === undefined) {
+      return {
+        patchPayload,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Validation failed while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}: label \"${labelName}\" was not found.\n`
+        }
+      };
+    }
+
+    labelIds.push(labelId);
+  }
+
+  return {
+    patchPayload,
+    labelIds
+  };
+}
+
 async function readIssueList(
   repository: RepositoryContext,
   context: ResolvedCliExecutionContext
@@ -900,7 +1570,11 @@ async function readIssueList(
   }
 }
 
-async function readCurrentUser(hostname: string, context: ResolvedCliExecutionContext): Promise<{ login?: string; error?: CliResult }> {
+async function readCurrentUser(
+  hostname: string,
+  context: ResolvedCliExecutionContext,
+  commandName: "status" | "edit" = "status"
+): Promise<{ login?: string; error?: CliResult }> {
   const token = resolveOptionalToken(hostname, context);
 
   if (token === undefined) {
@@ -908,7 +1582,7 @@ async function readCurrentUser(hostname: string, context: ResolvedCliExecutionCo
       error: {
         exitCode: 1,
         stdout: "",
-        stderr: "gtea issue status requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+        stderr: `gtea issue ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
       }
     };
   }
@@ -1176,7 +1850,8 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   if (subcommand === "comment") {
     const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
       allowTitle: false,
-      allowBody: true
+      allowBody: true,
+      allowBodyFile: false
     });
 
     if (parsedMutationFlags.error !== undefined) {
@@ -1230,11 +1905,18 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   if (subcommand === "edit") {
     const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
       allowTitle: true,
-      allowBody: true
+      allowBody: true,
+      allowBodyFile: true
     });
 
     if (parsedMutationFlags.error !== undefined) {
       return parsedMutationFlags.error;
+    }
+
+    const bodyInputResult = resolveIssueBodyInput(parsedMutationFlags.flags, context);
+
+    if (bodyInputResult.error !== undefined) {
+      return bodyInputResult.error;
     }
 
     if (parsedMutationFlags.flags.issueNumber === undefined) {
@@ -1245,11 +1927,16 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    if (parsedMutationFlags.flags.title === undefined && parsedMutationFlags.flags.body === undefined) {
+    if (
+      parsedMutationFlags.flags.title === undefined
+      && parsedMutationFlags.flags.body === undefined
+      && parsedMutationFlags.flags.bodyFile === undefined
+      && !hasIssueMetadataChanges(parsedMutationFlags.flags)
+    ) {
       return {
         exitCode: 1,
         stdout: "",
-        stderr: "At least one of --title or --body is required.\n"
+        stderr: "At least one supported issue edit flag is required.\n"
       };
     }
 
@@ -1263,29 +1950,55 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const editResult = await updateIssue(
+    const editPlanResult = await planIssueEditMutations(
       repositoryResult.repository,
       parsedMutationFlags.flags.issueNumber,
-      {
-        ...(parsedMutationFlags.flags.title === undefined ? {} : { title: parsedMutationFlags.flags.title }),
-        ...(parsedMutationFlags.flags.body === undefined ? {} : { body: parsedMutationFlags.flags.body })
-      },
-      context,
-      "edit",
-      "editing"
+      parsedMutationFlags.flags,
+      bodyInputResult.body,
+      context
     );
 
-    if (editResult.error !== undefined || editResult.issue === undefined) {
-      return editResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "Failed to edit issue.\n"
-      };
+    if (editPlanResult.error !== undefined) {
+      return editPlanResult.error;
+    }
+
+    const hasPatchPayload = Object.keys(editPlanResult.patchPayload).length > 0;
+
+    if (hasPatchPayload) {
+      const editResult = await updateIssue(
+        repositoryResult.repository,
+        parsedMutationFlags.flags.issueNumber,
+        editPlanResult.patchPayload,
+        context,
+        "edit",
+        "editing"
+      );
+
+      if (editResult.error !== undefined || editResult.issue === undefined) {
+        return editResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: "Failed to edit issue.\n"
+        };
+      }
+    }
+
+    if (editPlanResult.labelIds !== undefined) {
+      const labelResult = await replaceIssueLabels(
+        repositoryResult.repository,
+        parsedMutationFlags.flags.issueNumber,
+        editPlanResult.labelIds,
+        context
+      );
+
+      if (labelResult.error !== undefined) {
+        return labelResult.error;
+      }
     }
 
     return {
       exitCode: 0,
-      stdout: `${editResult.issue.url}\n`,
+      stdout: "",
       stderr: ""
     };
   }
@@ -1293,7 +2006,8 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   if (subcommand === "close") {
     const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
       allowTitle: false,
-      allowBody: false
+      allowBody: false,
+      allowBodyFile: false
     });
 
     if (parsedMutationFlags.error !== undefined) {
@@ -1345,7 +2059,8 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   if (subcommand === "reopen") {
     const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
       allowTitle: false,
-      allowBody: false
+      allowBody: false,
+      allowBodyFile: false
     });
 
     if (parsedMutationFlags.error !== undefined) {
