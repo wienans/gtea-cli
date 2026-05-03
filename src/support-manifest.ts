@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import rawManifestJson from "../support-manifest.json" with { type: "json" };
 
 export type SupportStatus = "supported" | "emulated" | "unsupported";
 
@@ -213,9 +213,7 @@ export function validateSupportManifest(rawManifest: RawSupportManifest): string
 }
 
 function loadSupportManifest(): SupportManifest {
-  const rawManifest = JSON.parse(
-    readFileSync(new URL("../support-manifest.json", import.meta.url), "utf8")
-  ) as RawSupportManifest;
+  const rawManifest = rawManifestJson as RawSupportManifest;
   const validationErrors = validateSupportManifest(rawManifest);
 
   if (validationErrors.length > 0) {

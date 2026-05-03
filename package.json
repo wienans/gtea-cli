@@ -8,6 +8,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "build:binary": "bun build --compile src/main.ts --outfile dist/bin/gtea",
+    "build:binaries": "bun run scripts/build-binaries.ts",
     "cli": "tsx src/main.ts",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc -p tsconfig.test.json"
