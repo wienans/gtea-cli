@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { executeCli } from "../src/cli.js";
 import { collectManifestPaths, supportManifest, validateSupportManifest } from "../src/support-manifest.js";
@@ -74,6 +75,38 @@ test("auth login persists a PAT and status reports the active host", () => {
     assert.equal(statusResult.exitCode, 0);
     assert.match(statusResult.stdout, /Active host:\s+gitea\.example\.com/i);
     assert.match(statusResult.stdout, /Credential source:\s+native config store/i);
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
+test("auth login reads a PAT from real stdin in the shell entrypoint", () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
+
+  try {
+    const result = spawnSync("bun", ["run", "cli", "auth", "login", "--hostname", "stdin.example.com", "--with-token"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot
+      },
+      input: "stdin-token\n"
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Logged in to stdin\.example\.com/i);
+
+    const statusResult = executeCli(["auth", "status"], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot
+      }
+    });
+
+    assert.equal(statusResult.exitCode, 0);
+    assert.match(statusResult.stdout, /Active host:\s+stdin\.example\.com/i);
   } finally {
     rmSync(configRoot, { force: true, recursive: true });
   }

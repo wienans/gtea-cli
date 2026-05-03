@@ -1,8 +1,38 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+
 import { executeCli } from "./cli.js";
 
-const result = executeCli(process.argv.slice(2));
+function commandReadsStdin(args: string[]): boolean {
+  const [group, subcommand] = args;
+
+  if (group !== "auth") {
+    return false;
+  }
+
+  if ((subcommand === "login" || subcommand === "refresh") && args.includes("--with-token")) {
+    return true;
+  }
+
+  return subcommand === "git-credential";
+}
+
+function readCommandStdin(args: string[]): string | undefined {
+  if (!commandReadsStdin(args)) {
+    return undefined;
+  }
+
+  if (process.stdin.isTTY && (args[1] === "login" || args[1] === "refresh") && args.includes("--with-token")) {
+    process.stderr.write("Paste the Personal Access Token, then press Ctrl+D to submit.\n");
+  }
+
+  return readFileSync(process.stdin.fd, "utf8");
+}
+
+const args = process.argv.slice(2);
+const stdin = readCommandStdin(args);
+const result = executeCli(args, stdin === undefined ? {} : { stdin });
 
 if (result.stdout.length > 0) {
   process.stdout.write(result.stdout);
