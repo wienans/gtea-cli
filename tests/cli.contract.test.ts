@@ -459,6 +459,51 @@ test("issue list reads repository issues from the selected Gitea host", async ()
   }
 });
 
+test("issue list accepts an explicit http host-qualified -R target", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=open") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          number: 7,
+          title: "Validate explicit host-qualified repository targets",
+          state: "open"
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["issue", "list", "-R", `http://127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /#7/);
+    assert.match(result.stdout, /Validate explicit host-qualified repository targets/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("pr list reads repository pull requests from the selected Gitea host", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/pulls?state=open") {
@@ -2169,6 +2214,38 @@ test("browse --no-browser uses the active host when -R omits it", async () => {
   }
 });
 
+test("browse preserves an explicit http active host selection", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-browse-http-"));
+
+  try {
+    const env = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot
+    };
+
+    const loginResult = await executeCli(["auth", "login", "--hostname", "http://browse.example.com", "--with-token"], {
+      env,
+      stdin: "browse-token\n"
+    });
+
+    assert.equal(loginResult.exitCode, 0);
+    assert.match(loginResult.stdout, /Logged in to http:\/\/browse\.example\.com/i);
+
+    const statusResult = await executeCli(["auth", "status"], { env });
+
+    assert.equal(statusResult.exitCode, 0);
+    assert.match(statusResult.stdout, /Active host:\s+http:\/\/browse\.example\.com/i);
+
+    const browseResult = await executeCli(["browse", "--no-browser", "-R", "octo/project"], { env });
+
+    assert.equal(browseResult.exitCode, 0);
+    assert.equal(browseResult.stdout, "http://browse.example.com/octo/project\n");
+    assert.equal(browseResult.stderr, "");
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
 test("browse --no-browser infers the repository from the current git remote", async () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "gtea-browse-repo-"));
 
@@ -2181,6 +2258,62 @@ test("browse --no-browser infers the repository from the current git remote", as
     assert.equal(initResult.status, 0, initResult.stderr);
 
     const remoteResult = spawnSync("git", ["remote", "add", "origin", "https://gitea.example.com/octo/project.git"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(remoteResult.status, 0, remoteResult.stderr);
+
+    const result = await executeCli(["browse", "--no-browser"], { cwd: repoRoot });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "https://gitea.example.com/octo/project\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(repoRoot, { force: true, recursive: true });
+  }
+});
+
+test("browse preserves an explicit http git remote when inferring the repository", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "gtea-browse-http-remote-"));
+
+  try {
+    const initResult = spawnSync("git", ["init", "--initial-branch=trunk"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(initResult.status, 0, initResult.stderr);
+
+    const remoteResult = spawnSync("git", ["remote", "add", "origin", "http://gitea.example.com/octo/project.git"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(remoteResult.status, 0, remoteResult.stderr);
+
+    const result = await executeCli(["browse", "--no-browser"], { cwd: repoRoot });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "http://gitea.example.com/octo/project\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(repoRoot, { force: true, recursive: true });
+  }
+});
+
+test("browse defaults an ssh url git remote to https when inferring the repository", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "gtea-browse-ssh-remote-"));
+
+  try {
+    const initResult = spawnSync("git", ["init", "--initial-branch=trunk"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(initResult.status, 0, initResult.stderr);
+
+    const remoteResult = spawnSync("git", ["remote", "add", "origin", "ssh://git@gitea.example.com/octo/project.git"], {
       cwd: repoRoot,
       encoding: "utf8"
     });
@@ -2314,7 +2447,7 @@ test("pr checkout uses the Git Toolchain to fetch and switch to the pull request
 
     assert.equal(currentBranchResult.status, 0, currentBranchResult.stderr);
     assert.equal(currentBranchResult.stdout.trim(), "feature/pr-read");
-    assert.equal(readFileSync(join(checkoutRoot, "feature.txt"), "utf8"), "base\npr branch\n");
+    assert.equal(readFileSync(join(checkoutRoot, "feature.txt"), "utf8").replace(/\r\n/g, "\n"), "base\npr branch\n");
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => {
@@ -2467,6 +2600,14 @@ test("browse honors a host-qualified -R target over the stored active host", asy
   }
 });
 
+test("browse preserves an explicit http host-qualified -R target", async () => {
+  const result = await executeCli(["browse", "--no-browser", "-R", "http://alt.example.com/octo/project"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, "http://alt.example.com/octo/project\n");
+  assert.equal(result.stderr, "");
+});
+
 test("browse rejects github.com as a non-eligible host", async () => {
   const result = await executeCli(["browse", "--no-browser", "-R", "github.com/octo/project"]);
 
@@ -2505,13 +2646,18 @@ test("auth login reads a PAT from real stdin in the shell entrypoint", async () 
   const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-"));
 
   try {
+    const env = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot,
+      APPDATA: configRoot
+    };
+
     const result = spawnSync("bun", ["run", "cli", "auth", "login", "--hostname", "stdin.example.com", "--with-token"], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
       encoding: "utf8",
       env: {
         ...process.env,
-        HOME: configRoot,
-        XDG_CONFIG_HOME: configRoot
+        ...env
       },
       input: "stdin-token\n"
     });
@@ -2519,12 +2665,7 @@ test("auth login reads a PAT from real stdin in the shell entrypoint", async () 
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Logged in to stdin\.example\.com/i);
 
-    const statusResult = await executeCli(["auth", "status"], {
-      env: {
-        HOME: configRoot,
-        XDG_CONFIG_HOME: configRoot
-      }
-    });
+    const statusResult = await executeCli(["auth", "status"], { env });
 
     assert.equal(statusResult.exitCode, 0);
     assert.match(statusResult.stdout, /Active host:\s+stdin\.example\.com/i);
@@ -2564,6 +2705,23 @@ test("auth token prefers GTEA compatibility variables over GH and stored config"
   } finally {
     rmSync(configRoot, { force: true, recursive: true });
   }
+});
+
+test("auth status preserves explicit schemes from compatibility variables and prefers GTEA_HOST", async () => {
+  const result = await executeCli(["auth", "status", "--show-token"], {
+    env: {
+      GH_HOST: "https://legacy.example.com",
+      GH_TOKEN: "legacy-token",
+      GTEA_HOST: "http://native.example.com",
+      GTEA_TOKEN: "native-token"
+    }
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /Active host:\s+http:\/\/native\.example\.com/i);
+  assert.match(result.stdout, /Credential source:\s+GTEA_TOKEN environment variable/i);
+  assert.match(result.stdout, /Token:\s+native-token/i);
+  assert.equal(result.stderr, "");
 });
 
 test("auth switch and logout manage the active host across multiple stored hosts", async () => {
@@ -2610,6 +2768,52 @@ test("auth switch and logout manage the active host across multiple stored hosts
 
     assert.equal(fallbackStatus.exitCode, 0);
     assert.match(fallbackStatus.stdout, /Active host:\s+second\.example\.com/i);
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
+test("auth stores explicit http and https hosts as distinct credentials", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-distinct-"));
+
+  try {
+    const env = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot
+    };
+
+    assert.equal(
+      (await executeCli(["auth", "login", "--hostname", "http://dual.example.com", "--with-token"], {
+        env,
+        stdin: "http-token\n"
+      })).exitCode,
+      0
+    );
+
+    assert.equal(
+      (await executeCli(["auth", "login", "--hostname", "https://dual.example.com", "--with-token"], {
+        env,
+        stdin: "https-token\n"
+      })).exitCode,
+      0
+    );
+
+    const httpTokenResult = await executeCli(["auth", "token", "--hostname", "http://dual.example.com"], { env });
+    const httpsTokenResult = await executeCli(["auth", "token", "--hostname", "https://dual.example.com"], { env });
+
+    assert.equal(httpTokenResult.exitCode, 0);
+    assert.equal(httpTokenResult.stdout, "http-token\n");
+    assert.equal(httpsTokenResult.exitCode, 0);
+    assert.equal(httpsTokenResult.stdout, "https-token\n");
+
+    const switchResult = await executeCli(["auth", "switch", "--hostname", "http://dual.example.com"], { env });
+
+    assert.equal(switchResult.exitCode, 0);
+
+    const statusResult = await executeCli(["auth", "status"], { env });
+
+    assert.equal(statusResult.exitCode, 0);
+    assert.match(statusResult.stdout, /Active host:\s+http:\/\/dual\.example\.com/i);
   } finally {
     rmSync(configRoot, { force: true, recursive: true });
   }
@@ -2687,6 +2891,49 @@ test("auth setup-git configures git to use the gtea credential helper for the se
 
     assert.equal(helperConfig.status, 0);
     assert.match(helperConfig.stdout, /!gtea auth git-credential --hostname git\.example\.com/);
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
+test("auth setup-git preserves an explicit http host in git credential helper config", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-auth-http-"));
+
+  try {
+    const gitConfigPath = join(configRoot, ".gitconfig");
+    const env = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot,
+      GIT_CONFIG_GLOBAL: gitConfigPath
+    };
+
+    assert.equal(
+      (await executeCli(["auth", "login", "--hostname", "http://git.example.com", "--with-token"], {
+        env,
+        stdin: "git-token\n"
+      })).exitCode,
+      0
+    );
+
+    const setupResult = await executeCli(["auth", "setup-git", "--hostname", "http://git.example.com"], { env });
+
+    assert.equal(setupResult.exitCode, 0);
+    assert.match(setupResult.stdout, /Configured Git credential helper for http:\/\/git\.example\.com/i);
+
+    const helperConfig = spawnSync(
+      "git",
+      ["config", "--global", "--get", "credential.http://git.example.com.helper"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...env
+        }
+      }
+    );
+
+    assert.equal(helperConfig.status, 0);
+    assert.match(helperConfig.stdout, /!gtea auth git-credential --hostname http:\/\/git\.example\.com/);
   } finally {
     rmSync(configRoot, { force: true, recursive: true });
   }

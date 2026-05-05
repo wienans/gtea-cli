@@ -11,7 +11,7 @@
     "build:binary": "bun build --compile src/main.ts --outfile dist/bin/gtea",
     "build:binaries": "bun run scripts/build-binaries.ts",
     "cli": "bun run src/main.ts",
-    "test": "bun test tests/*.test.ts",
+    "test": "bun test ./tests",
     "typecheck": "bunx tsc -p tsconfig.test.json"
   },
   "devDependencies": {
