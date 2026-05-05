@@ -721,7 +721,7 @@ function resolveRequiredRepoToken(
   hostname: string,
   subcommand: "create" | "rename" | "fork",
   context: ResolvedCliExecutionContext
-): { token?: string; error?: CliResult } {
+): { token: string } | { error: CliResult } {
   const token = resolveOptionalToken(hostname, context);
 
   if (token === undefined) {
@@ -750,7 +750,7 @@ async function readGiteaErrorMessage(response: Response): Promise<string | undef
 async function resolveAuthenticatedRepoUserLogin(
   hostname: string,
   token: string
-): Promise<{ login?: string; error?: CliResult }> {
+): Promise<{ login: string } | { error: CliResult }> {
   try {
     const response = await fetch(`${buildHostBaseUrl(hostname)}/api/v1/user`, {
       headers: {
@@ -814,34 +814,14 @@ async function createRepository(
 ): Promise<{ repo?: RepositoryRecord; cloneUrl?: string; error?: CliResult }> {
   const tokenResult = resolveRequiredRepoToken(target.hostname, "create", context);
 
-  if (tokenResult.error !== undefined) {
+  if ("error" in tokenResult) {
     return { error: tokenResult.error };
-  }
-
-  if (tokenResult.token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `gtea repo create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
-      }
-    };
   }
 
   const currentUserResult = await resolveAuthenticatedRepoUserLogin(target.hostname, tokenResult.token);
 
-  if (currentUserResult.error !== undefined) {
+  if ("error" in currentUserResult) {
     return { error: currentUserResult.error };
-  }
-
-  if (currentUserResult.login === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Gitea did not return a login for the active user on ${target.hostname}.\n`
-      }
-    };
   }
 
   const owner = target.owner ?? currentUserResult.login;
@@ -940,18 +920,8 @@ async function renameRepository(
 ): Promise<{ repo?: RepositoryRecord; error?: CliResult }> {
   const tokenResult = resolveRequiredRepoToken(repository.hostname, "rename", context);
 
-  if (tokenResult.error !== undefined) {
+  if ("error" in tokenResult) {
     return { error: tokenResult.error };
-  }
-
-  if (tokenResult.token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `gtea repo rename requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
-      }
-    };
   }
 
   try {
@@ -1030,34 +1000,14 @@ async function forkRepository(
 ): Promise<{ repo?: RepositoryRecord; cloneUrl?: string; error?: CliResult }> {
   const tokenResult = resolveRequiredRepoToken(repository.hostname, "fork", context);
 
-  if (tokenResult.error !== undefined) {
+  if ("error" in tokenResult) {
     return { error: tokenResult.error };
-  }
-
-  if (tokenResult.token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `gtea repo fork requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
-      }
-    };
   }
 
   const currentUserResult = await resolveAuthenticatedRepoUserLogin(repository.hostname, tokenResult.token);
 
-  if (currentUserResult.error !== undefined) {
+  if ("error" in currentUserResult) {
     return { error: currentUserResult.error };
-  }
-
-  if (currentUserResult.login === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Gitea did not return a login for the active user on ${repository.hostname}.\n`
-      }
-    };
   }
 
   const owner = options.organization ?? currentUserResult.login;
