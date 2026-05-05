@@ -137,7 +137,7 @@ _Avoid_: unit tests only, informal manual checks
 - Runtime compatibility does not imply shared persistent state; resolved: `gtea` uses its own **Native Config Store** instead of `gh` config files.
 - Script compatibility includes failure signaling, not just success paths; resolved: supported commands aim to preserve a compatible **Exit Contract**.
 - Interactive auth should not default to plain files when safer platform storage exists; resolved: `gtea` prefers a **Secure Credential Store** when available.
-- Public API docs may track newer development builds than the guaranteed floor; resolved: the first **Support Baseline** is `1.25.x`.
+- Public API docs may track newer development builds than the guaranteed floor; resolved: the first **Support Baseline** is `1.25.x`, and the live Gitea API reference can be fetched from https://gitea.com/api/swagger when checking current server capabilities.
 - `gtea` is not a generic forge client; resolved: commands only operate on an **Eligible Host** and fail clearly on GitHub targets.
 - Host transport was ambiguous between a fixed HTTPS assumption and a user choice; resolved: bare hostnames still default to HTTPS, but an explicit scheme becomes part of the **Gitea Host** identity and is preserved across auth, repository resolution, API calls, web routes, and Git credential setup.
 - Browser-facing commands should not depend on spotty API links; resolved: `gtea` uses **Web Route Synthesis** for `browse` and `--web` paths.
