@@ -1591,6 +1591,174 @@ test("issue edit patches the selected issue on the Gitea host", async () => {
   }
 });
 
+test("issue edit processes multiple issue numbers sequentially and keeps going after a failure", async () => {
+  const seenIssueNumbers: number[] = [];
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (
+      request.method === "PATCH"
+      && (request.url === "/api/v1/repos/octo/project/issues/18" || request.url === "/api/v1/repos/octo/project/issues/19")
+    ) {
+      const issueNumber = request.url.endsWith("/19") ? 19 : 18;
+      seenIssueNumbers.push(issueNumber);
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        title: "Retitle the issue"
+      });
+
+      if (issueNumber === 19) {
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({ message: "not found" }));
+        return;
+      }
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: issueNumber,
+          title: "Retitle the issue",
+          state: "open"
+        })
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "19",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Retitle the issue"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /issue #19 was not found in octo\/project/i);
+    assert.deepEqual(seenIssueNumbers, [18, 19]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue edit succeeds quietly across multiple issue numbers", async () => {
+  const seenIssueNumbers: number[] = [];
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token edit-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (
+      request.method === "PATCH"
+      && (request.url === "/api/v1/repos/octo/project/issues/18" || request.url === "/api/v1/repos/octo/project/issues/19")
+    ) {
+      const issueNumber = request.url.endsWith("/19") ? 19 : 18;
+      seenIssueNumbers.push(issueNumber);
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        body: "Updated issue body"
+      });
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: issueNumber,
+          title: `Issue ${issueNumber}`,
+          state: "open"
+        })
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "19",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--body",
+      "Updated issue body"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.deepEqual(seenIssueNumbers, [18, 19]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("issue edit reads the updated body from --body-file and stays quiet on success", async () => {
   const tempDir = mkdtempSync(join(tmpdir(), "gtea-issue-edit-body-file-"));
   const bodyPath = join(tempDir, "issue-body.md");
@@ -2170,7 +2338,95 @@ test("issue edit reports not found when the selected issue is missing during met
   }
 });
 
-test("issue close patches the selected issue state to closed", async () => {
+test("issue edit aggregates mixed validation, auth, and not-found failures across multiple issue numbers", async () => {
+  const seenIssueNumbers: number[] = [];
+
+  const server = createServer(async (request, response) => {
+    if (
+      request.method === "PATCH"
+      && (
+        request.url === "/api/v1/repos/octo/project/issues/18"
+        || request.url === "/api/v1/repos/octo/project/issues/19"
+        || request.url === "/api/v1/repos/octo/project/issues/20"
+      )
+    ) {
+      const issueNumber = Number.parseInt(request.url.split("/").pop() ?? "0", 10);
+      seenIssueNumbers.push(issueNumber);
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        title: "Retitle the issue"
+      });
+
+      if (issueNumber === 18) {
+        response.writeHead(422, { "content-type": "application/json" });
+        response.end(JSON.stringify({ message: "title is invalid" }));
+        return;
+      }
+
+      if (issueNumber === 19) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ message: "unauthorized" }));
+        return;
+      }
+
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "edit",
+      "18",
+      "19",
+      "20",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Retitle the issue"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /validation failed while editing issue #18 in octo\/project: title is invalid/i);
+    assert.match(result.stderr, /authentication failed while editing issue #19 on 127\.0\.0\.1:/i);
+    assert.match(result.stderr, /issue #20 was not found in octo\/project/i);
+    assert.deepEqual(seenIssueNumbers, [18, 19, 20]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue close patches the selected issue state to closed quietly", async () => {
   const server = createServer(async (request, response) => {
     if (request.headers.authorization !== "token close-token") {
       response.writeHead(401, { "content-type": "application/json" });
@@ -2223,7 +2479,7 @@ test("issue close patches the selected issue state to closed", async () => {
     });
 
     assert.equal(result.exitCode, 0);
-    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/18\n`);
+    assert.equal(result.stdout, "");
     assert.equal(result.stderr, "");
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -2239,7 +2495,7 @@ test("issue close patches the selected issue state to closed", async () => {
   }
 });
 
-test("issue reopen patches the selected issue state to open", async () => {
+test("issue reopen patches the selected issue state to open quietly", async () => {
   const server = createServer(async (request, response) => {
     if (request.headers.authorization !== "token reopen-token") {
       response.writeHead(401, { "content-type": "application/json" });
@@ -2292,7 +2548,7 @@ test("issue reopen patches the selected issue state to open", async () => {
     });
 
     assert.equal(result.exitCode, 0);
-    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/18\n`);
+    assert.equal(result.stdout, "");
     assert.equal(result.stderr, "");
   } finally {
     await new Promise<void>((resolve, reject) =>

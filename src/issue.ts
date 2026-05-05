@@ -25,6 +25,7 @@ interface ParsedIssueCreateFlags {
 
 interface ParsedIssueMutationFlags {
   issueNumber?: number;
+  issueNumbers: number[];
   repository?: string;
   title?: string;
   body?: string;
@@ -443,9 +444,10 @@ function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags;
 
 function parseIssueMutationFlags(
   args: string[],
-  options: { allowTitle: boolean; allowBody: boolean; allowBodyFile: boolean }
+  options: { allowTitle: boolean; allowBody: boolean; allowBodyFile: boolean; allowMultipleIssueNumbers?: boolean }
 ): { flags: ParsedIssueMutationFlags; error?: CliResult } {
   const flags: ParsedIssueMutationFlags = {
+    issueNumbers: [],
     addLabels: [],
     removeLabels: [],
     addAssignees: [],
@@ -682,7 +684,7 @@ function parseIssueMutationFlags(
       };
     }
 
-    if (flags.issueNumber !== undefined) {
+    if (flags.issueNumber !== undefined && options.allowMultipleIssueNumbers !== true) {
       return {
         flags,
         error: {
@@ -704,7 +706,13 @@ function parseIssueMutationFlags(
       };
     }
 
-    flags.issueNumber = Number.parseInt(token, 10);
+    const issueNumber = Number.parseInt(token, 10);
+
+    if (flags.issueNumber === undefined) {
+      flags.issueNumber = issueNumber;
+    }
+
+    flags.issueNumbers.push(issueNumber);
   }
 
   return { flags };
@@ -2097,7 +2105,8 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
       allowTitle: true,
       allowBody: true,
-      allowBodyFile: true
+      allowBodyFile: true,
+      allowMultipleIssueNumbers: true
     });
 
     if (parsedMutationFlags.error !== undefined) {
@@ -2110,7 +2119,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       return bodyInputResult.error;
     }
 
-    if (parsedMutationFlags.flags.issueNumber === undefined) {
+    if (parsedMutationFlags.flags.issueNumbers.length === 0) {
       return {
         exitCode: 1,
         stdout: "",
@@ -2141,50 +2150,62 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const editPlanResult = await planIssueEditMutations(
-      repositoryResult.repository,
-      parsedMutationFlags.flags.issueNumber,
-      parsedMutationFlags.flags,
-      bodyInputResult.body,
-      context
-    );
+    const failureMessages: string[] = [];
 
-    if (editPlanResult.error !== undefined) {
-      return editPlanResult.error;
-    }
-
-    const hasPatchPayload = Object.keys(editPlanResult.patchPayload).length > 0;
-
-    if (hasPatchPayload) {
-      const editResult = await updateIssue(
+    for (const issueNumber of parsedMutationFlags.flags.issueNumbers) {
+      const editPlanResult = await planIssueEditMutations(
         repositoryResult.repository,
-        parsedMutationFlags.flags.issueNumber,
-        editPlanResult.patchPayload,
-        context,
-        "edit",
-        "editing"
-      );
-
-      if (editResult.error !== undefined || editResult.issue === undefined) {
-        return editResult.error ?? {
-          exitCode: 1,
-          stdout: "",
-          stderr: "Failed to edit issue.\n"
-        };
-      }
-    }
-
-    if (editPlanResult.labelIds !== undefined) {
-      const labelResult = await replaceIssueLabels(
-        repositoryResult.repository,
-        parsedMutationFlags.flags.issueNumber,
-        editPlanResult.labelIds,
+        issueNumber,
+        parsedMutationFlags.flags,
+        bodyInputResult.body,
         context
       );
 
-      if (labelResult.error !== undefined) {
-        return labelResult.error;
+      if (editPlanResult.error !== undefined) {
+        failureMessages.push(editPlanResult.error.stderr);
+        continue;
       }
+
+      const hasPatchPayload = Object.keys(editPlanResult.patchPayload).length > 0;
+
+      if (hasPatchPayload) {
+        const editResult = await updateIssue(
+          repositoryResult.repository,
+          issueNumber,
+          editPlanResult.patchPayload,
+          context,
+          "edit",
+          "editing"
+        );
+
+        if (editResult.error !== undefined || editResult.issue === undefined) {
+          failureMessages.push(
+            editResult.error?.stderr ?? "Failed to edit issue.\n"
+          );
+          continue;
+        }
+      }
+
+      if (editPlanResult.labelIds !== undefined) {
+        const labelResult = await replaceIssueLabels(
+          repositoryResult.repository,
+          issueNumber,
+          editPlanResult.labelIds,
+          context
+        );
+
+        if (labelResult.error !== undefined) {
+          failureMessages.push(labelResult.error.stderr);
+        }
+      }
+    }
+
+    if (failureMessages.length > 0) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: failureMessages.join("")
+      };
     }
 
     return {
@@ -2242,7 +2263,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
     return {
       exitCode: 0,
-      stdout: `${closeResult.issue.url}\n`,
+      stdout: "",
       stderr: ""
     };
   }
@@ -2295,7 +2316,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
     return {
       exitCode: 0,
-      stdout: `${reopenResult.issue.url}\n`,
+      stdout: "",
       stderr: ""
     };
   }
