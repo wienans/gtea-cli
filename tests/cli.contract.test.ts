@@ -732,6 +732,69 @@ test("issue view supports manifest-backed json output fields", async () => {
   }
 });
 
+test("issue view maps a lone Gitea assignee into the gh-shaped assignees field", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship the issue read slice",
+        state: "open",
+        assignee: {
+          id: 11,
+          login: "hubot",
+          full_name: "Hub O. T."
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "assignees"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      assignees: [
+        {
+          id: 11,
+          login: "hubot",
+          name: "Hub O. T."
+        }
+      ]
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("issue view rejects manifest-declared unsupported json output fields", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/issues/42") {

@@ -862,6 +862,30 @@ function mapIssueLabelRecord(payload: GiteaLabelPayload): IssueLabelRecord | nul
   };
 }
 
+function mapIssueAssigneeRecords(payload: GiteaIssuePayload): IssueUserRecord[] {
+  const seen = new Set<string>();
+  const assignees: IssueUserRecord[] = [];
+
+  for (const candidate of [payload.assignee, ...(payload.assignees ?? [])]) {
+    const assignee = mapIssueUserRecord(candidate);
+
+    if (assignee === null) {
+      continue;
+    }
+
+    const assigneeKey = `${String(assignee.id)}:${String(assignee.login)}:${String(assignee.name)}`;
+
+    if (seen.has(assigneeKey)) {
+      continue;
+    }
+
+    seen.add(assigneeKey);
+    assignees.push(assignee);
+  }
+
+  return assignees;
+}
+
 function mapIssueMilestoneRecord(payload?: GiteaMilestonePayload): IssueMilestoneRecord | null {
   if (payload === undefined) {
     return null;
@@ -907,11 +931,7 @@ function mapIssueRecord(repository: RepositoryContext, payload: GiteaIssuePayloa
   const body = typeof payload.body === "string" ? payload.body : undefined;
   const author = mapIssueUserRecord(payload.user);
   const authorLogin = typeof payload.user?.login === "string" ? payload.user.login : undefined;
-  const assignees = Array.isArray(payload.assignees)
-    ? payload.assignees
-      .map((assignee) => mapIssueUserRecord(assignee))
-      .filter((assignee): assignee is IssueUserRecord => assignee !== null)
-    : [];
+  const assignees = mapIssueAssigneeRecords(payload);
   const labels = Array.isArray(payload.labels)
     ? payload.labels
       .map((label) => mapIssueLabelRecord(label))
