@@ -94,6 +94,185 @@
         ]
       }
     ],
+    "repoCreateOptions": [
+      {
+        "name": "--clone",
+        "aliases": [
+          "-c"
+        ],
+        "summary": "Clone the new repository",
+        "status": "emulated",
+        "reason": "Clones the created repository immediately after the create request succeeds using the Git Toolchain."
+      },
+      {
+        "name": "--description",
+        "aliases": [
+          "-d"
+        ],
+        "summary": "Description of the repository",
+        "status": "supported"
+      },
+      {
+        "name": "--private",
+        "summary": "Make the new repository private",
+        "status": "supported"
+      },
+      {
+        "name": "--public",
+        "summary": "Make the new repository public",
+        "status": "supported"
+      }
+    ],
+    "repoCreateUnsupportedOptions": [
+      {
+        "name": "--add-readme",
+        "summary": "Add a README file to the new repository",
+        "status": "unsupported",
+        "reason": "Repository template materialization is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--disable-issues",
+        "summary": "Disable issues in the new repository",
+        "status": "unsupported",
+        "reason": "Issue tracker policy toggles are not part of the supported repository administration slice."
+      },
+      {
+        "name": "--disable-wiki",
+        "summary": "Disable wiki in the new repository",
+        "status": "unsupported",
+        "reason": "Wiki policy toggles are not part of the supported repository administration slice."
+      },
+      {
+        "name": "--gitignore",
+        "aliases": [
+          "-g"
+        ],
+        "summary": "Specify a gitignore template for the repository",
+        "status": "unsupported",
+        "reason": "Repository template materialization is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--homepage",
+        "aliases": [
+          "-h"
+        ],
+        "summary": "Repository home page URL",
+        "status": "unsupported",
+        "reason": "Homepage configuration is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--include-all-branches",
+        "summary": "Include all branches from template repository",
+        "status": "unsupported",
+        "reason": "Template branch expansion is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--internal",
+        "summary": "Make the new repository internal",
+        "status": "unsupported",
+        "reason": "Internal visibility is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--license",
+        "aliases": [
+          "-l"
+        ],
+        "summary": "Specify an Open Source License for the repository",
+        "status": "unsupported",
+        "reason": "Repository template materialization is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--push",
+        "summary": "Push local commits to the new repository",
+        "status": "unsupported",
+        "reason": "Pushing local refs during repository creation is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--remote",
+        "aliases": [
+          "-r"
+        ],
+        "summary": "Specify remote name for the created repository",
+        "status": "unsupported",
+        "reason": "Remote naming for source-driven repository creation is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--source",
+        "aliases": [
+          "-s"
+        ],
+        "summary": "Specify path to local repository to use as source",
+        "status": "unsupported",
+        "reason": "Creating a remote repository from a local source checkout is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--team",
+        "aliases": [
+          "-t"
+        ],
+        "summary": "The organization team to be granted access",
+        "status": "unsupported",
+        "reason": "Organization team assignment is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--template",
+        "aliases": [
+          "-p"
+        ],
+        "summary": "Make the new repository based on a template repository",
+        "status": "unsupported",
+        "reason": "Template repository creation is not part of the supported repository administration slice."
+      }
+    ],
+    "repoRenameOptions": [
+      {
+        "name": "--yes",
+        "aliases": [
+          "-y"
+        ],
+        "summary": "Skip the confirmation prompt",
+        "status": "emulated",
+        "reason": "The supported rename slice is already non-interactive, so --yes is accepted for gh compatibility."
+      }
+    ],
+    "repoForkOptions": [
+      {
+        "name": "--clone",
+        "summary": "Clone the fork",
+        "status": "emulated",
+        "reason": "Clones the forked repository immediately after the fork request succeeds using the Git Toolchain."
+      },
+      {
+        "name": "--fork-name",
+        "summary": "Rename the forked repository",
+        "status": "supported"
+      },
+      {
+        "name": "--org",
+        "summary": "Create the fork in an organization",
+        "status": "supported"
+      }
+    ],
+    "repoForkUnsupportedOptions": [
+      {
+        "name": "--default-branch-only",
+        "summary": "Only include the default branch in the fork",
+        "status": "unsupported",
+        "reason": "Selective branch transfer is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--remote",
+        "summary": "Add a git remote for the fork",
+        "status": "unsupported",
+        "reason": "Git remote rewriting is not part of the supported repository administration slice."
+      },
+      {
+        "name": "--remote-name",
+        "summary": "Specify the name for the fork remote",
+        "status": "unsupported",
+        "reason": "Git remote rewriting is not part of the supported repository administration slice."
+      }
+    ],
     "issueStructuredOutput": [
       {
         "name": "--json",
@@ -1217,22 +1396,31 @@
           "kind": "command",
           "name": "create",
           "summary": "Create a repository",
-          "status": "unsupported",
-          "reason": "Pending the repository administration slice (#11)."
+          "status": "supported",
+          "flagProfiles": [
+            "repoCreateOptions",
+            "repoCreateUnsupportedOptions"
+          ]
         },
         {
           "kind": "command",
           "name": "fork",
           "summary": "Fork a repository",
-          "status": "unsupported",
-          "reason": "Pending the repository administration slice (#11)."
+          "status": "supported",
+          "flagProfiles": [
+            "repoForkOptions",
+            "repoForkUnsupportedOptions"
+          ]
         },
         {
           "kind": "command",
           "name": "rename",
           "summary": "Rename a repository",
-          "status": "unsupported",
-          "reason": "Pending the repository administration slice (#11)."
+          "status": "supported",
+          "flagProfiles": [
+            "repoRepositoryTarget",
+            "repoRenameOptions"
+          ]
         }
       ]
     }
