@@ -185,7 +185,10 @@ export function validateSupportManifest(rawManifest: RawSupportManifest): string
 
       flagNames.add(flag.name);
 
-      if ((flag.name === "--jq" || flag.name === "--template") && !flag.requires?.includes("--json")) {
+      const isStructuredOutputHelper = flag.name === "--jq"
+        || (flag.name === "--template" && /format json output/i.test(flag.summary));
+
+      if (isStructuredOutputHelper && !flag.requires?.includes("--json")) {
         errors.push(`Structured output helper flag must depend on --json: ${pathKey} ${flag.name}`);
       }
     }

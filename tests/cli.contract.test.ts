@@ -81,6 +81,23 @@ test("issue edit help classifies supported and unsupported metadata flags", asyn
   assert.match(result.stdout, /--remove-project[\s\S]*\[unsupported\]/i);
 });
 
+test("issue create help classifies supported, emulated, and unsupported flags", async () => {
+  const result = await executeCli(["issue", "create", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--title, -t[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--body, -b[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--body-file, -F[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--assignee, -a[\s\S]*\[emulated\]/i);
+  assert.match(result.stdout, /--label, -l[\s\S]*\[emulated\]/i);
+  assert.match(result.stdout, /--milestone, -m[\s\S]*\[emulated\]/i);
+  assert.match(result.stdout, /--editor, -e[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--project, -p[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--recover[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--template, -T[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--web, -w[\s\S]*\[unsupported\]/i);
+});
+
 test("issue list help classifies supported and unsupported list flags", async () => {
   const result = await executeCli(["issue", "list", "--help"]);
 
@@ -1667,6 +1684,337 @@ test("issue create posts a new issue to the selected Gitea host", async () => {
   }
 });
 
+test("issue create reads the issue body from --body-file", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "gtea-issue-create-body-file-"));
+  const bodyPath = join(tempDir, "issue-body.md");
+  writeFileSync(bodyPath, "Create body from file\n");
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/issues") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      title: "Ship the issue maintenance slice",
+      body: "Create body from file\n"
+    });
+
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 19,
+        title: "Ship the issue maintenance slice",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Ship the issue maintenance slice",
+      "--body-file",
+      bodyPath
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/19\n`);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("issue create reads body text from stdin when --body-file - is used", async () => {
+  let requestPayload: unknown;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/issues") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    requestPayload = JSON.parse(requestBody);
+
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 19,
+        title: "Ship the issue maintenance slice",
+        state: "open"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Ship the issue maintenance slice",
+      "--body-file",
+      "-"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "create-token"
+      },
+      stdin: "Body from stdin\nSecond line\n"
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/19\n`);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(requestPayload, {
+      title: "Ship the issue maintenance slice",
+      body: "Body from stdin\nSecond line\n"
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue create applies supported assignee, label, and milestone metadata flags", async () => {
+  let sawCreate = false;
+  let sawIssueRead = false;
+  let sawCurrentUserRead = false;
+  let sawLabelsRead = false;
+  let sawMilestonesRead = false;
+  let sawIssuePatch = false;
+  let sawLabelUpdate = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/v1/repos/octo/project/issues") {
+      sawCreate = true;
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        title: "Ship the issue create slice",
+        body: "Create it with metadata."
+      });
+
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 21,
+          title: "Ship the issue create slice",
+          state: "open"
+        })
+      );
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/issues/21") {
+      sawIssueRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 21,
+          title: "Ship the issue create slice",
+          state: "open",
+          labels: [],
+          assignees: [],
+          milestone: null
+        })
+      );
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/user") {
+      sawCurrentUserRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ login: "hubot" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/labels") {
+      sawLabelsRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([{ id: 4, name: "triage" }]));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/milestones?state=all") {
+      sawMilestonesRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([{ id: 8, title: "Sprint 2" }]));
+      return;
+    }
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/project/issues/21") {
+      sawIssuePatch = true;
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        assignees: ["hubot"],
+        milestone: 8
+      });
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 21,
+          title: "Ship the issue create slice",
+          state: "open"
+        })
+      );
+      return;
+    }
+
+    if (request.method === "PUT" && request.url === "/api/v1/repos/octo/project/issues/21/labels") {
+      sawLabelUpdate = true;
+
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        labels: [4]
+      });
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([{ id: 4, name: "triage" }]));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Ship the issue create slice",
+      "--body",
+      "Create it with metadata.",
+      "--assignee",
+      "@me",
+      "--label",
+      "triage",
+      "--milestone",
+      "Sprint 2"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/issues/21\n`);
+    assert.equal(result.stderr, "");
+    assert.equal(sawCreate, true);
+    assert.equal(sawIssueRead, true);
+    assert.equal(sawCurrentUserRead, true);
+    assert.equal(sawLabelsRead, true);
+    assert.equal(sawMilestonesRead, true);
+    assert.equal(sawIssuePatch, true);
+    assert.equal(sawLabelUpdate, true);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("pr diff prints the unified diff for the selected pull request", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/pulls/42.diff") {
@@ -2946,6 +3294,38 @@ test("issue create fails clearly for unsupported recover semantics", async () =>
   assert.equal(result.exitCode, 1);
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /issue create flag --recover is currently unsupported/i);
+});
+
+test("issue create rejects @copilot as an explicit unsupported assignee alias", async () => {
+  const result = await executeCli([
+    "issue",
+    "create",
+    "-R",
+    "gitea.example.com/octo/project",
+    "--title",
+    "Unsupported",
+    "--assignee",
+    "@copilot"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /gtea issue create flag --assignee is currently unsupported/i);
+  assert.match(result.stderr, /copilot assignee aliases are not supported on gitea hosts/i);
+});
+
+test("issue create rejects unsupported editor semantics explicitly", async () => {
+  const result = await executeCli([
+    "issue",
+    "create",
+    "-R",
+    "gitea.example.com/octo/project",
+    "--editor"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /issue create flag --editor is currently unsupported/i);
 });
 
 test("browse help shows the supported routing flags", async () => {

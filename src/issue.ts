@@ -42,6 +42,13 @@ interface ParsedIssueCreateFlags {
   repository?: string;
   title?: string;
   body?: string;
+  bodyFile?: string;
+  addLabels: string[];
+  removeLabels: string[];
+  addAssignees: string[];
+  removeAssignees: string[];
+  milestone?: string;
+  removeMilestone?: boolean;
 }
 
 interface ParsedIssueMutationFlags {
@@ -585,7 +592,12 @@ function parseIssueFlags(
 }
 
 function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags; error?: CliResult } {
-  const flags: ParsedIssueCreateFlags = {};
+  const flags: ParsedIssueCreateFlags = {
+    addLabels: [],
+    removeLabels: [],
+    addAssignees: [],
+    removeAssignees: []
+  };
 
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
@@ -620,7 +632,69 @@ function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags;
       };
     }
 
-    const titleFlag = parseStringFlagValue(args, index, { long: "--title" });
+    if (token === "--editor" || token === "-e") {
+      return {
+        flags,
+        error: renderUnsupportedIssueFlag(
+          "create",
+          "--editor",
+          "Interactive editor-driven issue drafting is not part of the supported issue create slice."
+        )
+      };
+    }
+
+    if (token === "--web" || token === "-w") {
+      return {
+        flags,
+        error: renderUnsupportedIssueFlag(
+          "create",
+          "--web",
+          "Browser-driven issue creation is not part of the supported issue create slice."
+        )
+      };
+    }
+
+    const projectFlag = parseStringFlagValue(args, index, { long: "--project", short: "-p" });
+
+    if (projectFlag.error !== undefined) {
+      return {
+        flags,
+        error: projectFlag.error
+      };
+    }
+
+    if (projectFlag.handled) {
+      return {
+        flags,
+        error: renderUnsupportedIssueFlag(
+          "create",
+          "--project",
+          "Project assignment during issue creation is not part of the supported issue create slice."
+        )
+      };
+    }
+
+    const templateFlag = parseStringFlagValue(args, index, { long: "--template", short: "-T" });
+
+    if (templateFlag.error !== undefined) {
+      return {
+        flags,
+        error: templateFlag.error
+      };
+    }
+
+    if (templateFlag.handled) {
+      return {
+        flags,
+        error: renderUnsupportedIssueFlag(
+          "create",
+          "--template",
+          "Issue template expansion is not part of the supported issue create slice."
+        )
+      };
+    }
+
+    const titleFlag = parseStringFlagValue(args, index, { long: "--title", short: "-t" });
 
     if (titleFlag.error !== undefined) {
       return {
@@ -635,7 +709,7 @@ function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags;
       continue;
     }
 
-    const bodyFlag = parseStringFlagValue(args, index, { long: "--body" });
+    const bodyFlag = parseStringFlagValue(args, index, { long: "--body", short: "-b" });
 
     if (bodyFlag.error !== undefined) {
       return {
@@ -647,6 +721,79 @@ function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags;
     if (bodyFlag.handled && bodyFlag.value !== undefined) {
       flags.body = bodyFlag.value;
       index = bodyFlag.nextIndex;
+      continue;
+    }
+
+    const bodyFileFlag = parseStringFlagValue(args, index, { long: "--body-file", short: "-F", allowDashValue: true });
+
+    if (bodyFileFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFileFlag.error
+      };
+    }
+
+    if (bodyFileFlag.handled && bodyFileFlag.value !== undefined) {
+      flags.bodyFile = bodyFileFlag.value;
+      index = bodyFileFlag.nextIndex;
+      continue;
+    }
+
+    const labelFlag = parseStringFlagValue(args, index, { long: "--label", short: "-l" });
+
+    if (labelFlag.error !== undefined) {
+      return {
+        flags,
+        error: labelFlag.error
+      };
+    }
+
+    if (labelFlag.handled && labelFlag.value !== undefined) {
+      flags.addLabels.push(...parseCsvValues(labelFlag.value));
+      index = labelFlag.nextIndex;
+      continue;
+    }
+
+    const assigneeFlag = parseStringFlagValue(args, index, { long: "--assignee", short: "-a" });
+
+    if (assigneeFlag.error !== undefined) {
+      return {
+        flags,
+        error: assigneeFlag.error
+      };
+    }
+
+    if (assigneeFlag.handled && assigneeFlag.value !== undefined) {
+      const assigneeValues = parseCsvValues(assigneeFlag.value);
+
+      if (assigneeValues.includes("@copilot")) {
+        return {
+          flags,
+          error: renderUnsupportedIssueFlag(
+            "create",
+            "--assignee",
+            "Copilot assignee aliases are not supported on Gitea hosts."
+          )
+        };
+      }
+
+      flags.addAssignees.push(...assigneeValues);
+      index = assigneeFlag.nextIndex;
+      continue;
+    }
+
+    const milestoneFlag = parseStringFlagValue(args, index, { long: "--milestone", short: "-m" });
+
+    if (milestoneFlag.error !== undefined) {
+      return {
+        flags,
+        error: milestoneFlag.error
+      };
+    }
+
+    if (milestoneFlag.handled && milestoneFlag.value !== undefined) {
+      flags.milestone = milestoneFlag.value;
+      index = milestoneFlag.nextIndex;
       continue;
     }
 
@@ -951,7 +1098,7 @@ function parseIssueMutationFlags(
 }
 
 function resolveIssueBodyInput(
-  flags: ParsedIssueMutationFlags,
+  flags: { body?: string; bodyFile?: string },
   context: ResolvedCliExecutionContext
 ): { body?: string; error?: CliResult } {
   if (flags.body !== undefined && flags.bodyFile !== undefined) {
@@ -1002,6 +1149,17 @@ function hasIssueMetadataChanges(flags: ParsedIssueMutationFlags): boolean {
     || flags.milestone !== undefined
     || flags.removeMilestone === true
   );
+}
+
+function buildIssueCreateMutationFlags(flags: ParsedIssueCreateFlags): ParsedIssueMutationFlags {
+  return {
+    issueNumbers: [],
+    addLabels: [...flags.addLabels],
+    removeLabels: [],
+    addAssignees: [...flags.addAssignees],
+    removeAssignees: [],
+    ...(flags.milestone === undefined ? {} : { milestone: flags.milestone })
+  };
 }
 
 function uniqueValues(values: string[]): string[] {
@@ -1740,7 +1898,7 @@ async function updateIssue(
   issueNumber: number,
   payload: IssueUpdatePayload,
   context: ResolvedCliExecutionContext,
-  commandName: "edit" | "close" | "reopen",
+  commandName: "create" | "edit" | "close" | "reopen",
   actionLabel: string
 ): Promise<{ issue?: IssueRecord; error?: CliResult }> {
   const token = resolveOptionalToken(repository.hostname, context);
@@ -2072,6 +2230,55 @@ async function planIssueEditMutations(
   };
 }
 
+async function applyIssueMutationPlan(
+  repository: RepositoryContext,
+  issueNumber: number,
+  plan: { patchPayload: IssueUpdatePayload; labelIds?: number[] },
+  context: ResolvedCliExecutionContext,
+  commandName: "create" | "edit"
+): Promise<{ error?: CliResult }> {
+  const actionLabel = commandName === "create" ? "creating" : "editing";
+  const hasPatchPayload = Object.keys(plan.patchPayload).length > 0;
+
+  if (hasPatchPayload) {
+    const updateResult = await updateIssue(
+      repository,
+      issueNumber,
+      plan.patchPayload,
+      context,
+      commandName,
+      actionLabel
+    );
+
+    if (updateResult.error !== undefined || updateResult.issue === undefined) {
+      return {
+        error: updateResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Failed to ${commandName} issue.\n`
+        }
+      };
+    }
+  }
+
+  if (plan.labelIds !== undefined) {
+    const labelResult = await replaceIssueLabels(
+      repository,
+      issueNumber,
+      plan.labelIds,
+      context
+    );
+
+    if (labelResult.error !== undefined) {
+      return {
+        error: labelResult.error
+      };
+    }
+  }
+
+  return {};
+}
+
 async function readIssueList(
   repository: RepositoryContext,
   context: ResolvedCliExecutionContext,
@@ -2364,6 +2571,12 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       return parsedCreateFlags.error;
     }
 
+    const bodyInputResult = resolveIssueBodyInput(parsedCreateFlags.flags, context);
+
+    if (bodyInputResult.error !== undefined) {
+      return bodyInputResult.error;
+    }
+
     if (parsedCreateFlags.flags.title === undefined) {
       return {
         exitCode: 1,
@@ -2385,7 +2598,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     const createResult = await createIssue(
       repositoryResult.repository,
       parsedCreateFlags.flags.title,
-      parsedCreateFlags.flags.body,
+      bodyInputResult.body,
       context
     );
 
@@ -2395,6 +2608,34 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
         stdout: "",
         stderr: "Failed to create issue.\n"
       };
+    }
+
+    const createMetadataFlags = buildIssueCreateMutationFlags(parsedCreateFlags.flags);
+
+    if (hasIssueMetadataChanges(createMetadataFlags)) {
+      const metadataPlanResult = await planIssueEditMutations(
+        repositoryResult.repository,
+        createResult.issue.number,
+        createMetadataFlags,
+        undefined,
+        context
+      );
+
+      if (metadataPlanResult.error !== undefined) {
+        return metadataPlanResult.error;
+      }
+
+      const metadataApplyResult = await applyIssueMutationPlan(
+        repositoryResult.repository,
+        createResult.issue.number,
+        metadataPlanResult,
+        context,
+        "create"
+      );
+
+      if (metadataApplyResult.error !== undefined) {
+        return metadataApplyResult.error;
+      }
     }
 
     return {
@@ -2524,37 +2765,16 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
         continue;
       }
 
-      const hasPatchPayload = Object.keys(editPlanResult.patchPayload).length > 0;
+      const applyResult = await applyIssueMutationPlan(
+        repositoryResult.repository,
+        issueNumber,
+        editPlanResult,
+        context,
+        "edit"
+      );
 
-      if (hasPatchPayload) {
-        const editResult = await updateIssue(
-          repositoryResult.repository,
-          issueNumber,
-          editPlanResult.patchPayload,
-          context,
-          "edit",
-          "editing"
-        );
-
-        if (editResult.error !== undefined || editResult.issue === undefined) {
-          failureMessages.push(
-            editResult.error?.stderr ?? "Failed to edit issue.\n"
-          );
-          continue;
-        }
-      }
-
-      if (editPlanResult.labelIds !== undefined) {
-        const labelResult = await replaceIssueLabels(
-          repositoryResult.repository,
-          issueNumber,
-          editPlanResult.labelIds,
-          context
-        );
-
-        if (labelResult.error !== undefined) {
-          failureMessages.push(labelResult.error.stderr);
-        }
+      if (applyResult.error !== undefined) {
+        failureMessages.push(applyResult.error.stderr);
       }
     }
 

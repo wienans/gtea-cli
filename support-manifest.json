@@ -173,13 +173,54 @@
     "issueCreateOptions": [
       {
         "name": "--title",
+        "aliases": [
+          "-t"
+        ],
         "summary": "Supply the issue title",
         "status": "supported"
       },
       {
         "name": "--body",
+        "aliases": [
+          "-b"
+        ],
         "summary": "Supply the issue body",
         "status": "supported"
+      },
+      {
+        "name": "--body-file",
+        "aliases": [
+          "-F"
+        ],
+        "summary": "Read body text from file (use \"-\" to read from standard input)",
+        "status": "supported"
+      },
+      {
+        "name": "--assignee",
+        "aliases": [
+          "-a"
+        ],
+        "summary": "Assign people by their login; use \"@me\" to self-assign",
+        "status": "emulated",
+        "reason": "Applies assignees in an immediate follow-up issue edit after creation."
+      },
+      {
+        "name": "--label",
+        "aliases": [
+          "-l"
+        ],
+        "summary": "Add labels by name",
+        "status": "emulated",
+        "reason": "Applies labels in an immediate follow-up issue edit after creation."
+      },
+      {
+        "name": "--milestone",
+        "aliases": [
+          "-m"
+        ],
+        "summary": "Add the issue to a milestone by name",
+        "status": "emulated",
+        "reason": "Resolves the milestone and applies it in an immediate follow-up issue edit after creation."
       }
     ],
     "prStructuredOutput": [
@@ -207,10 +248,46 @@
     ],
     "issueCreateUnsupportedOptions": [
       {
+        "name": "--editor",
+        "aliases": [
+          "-e"
+        ],
+        "summary": "Skip prompts and open the text editor to write the title and body in",
+        "status": "unsupported",
+        "reason": "Interactive editor-driven issue drafting is not part of the supported issue create slice."
+      },
+      {
+        "name": "--project",
+        "aliases": [
+          "-p"
+        ],
+        "summary": "Add the issue to projects by title",
+        "status": "unsupported",
+        "reason": "Project assignment during issue creation is not part of the supported issue create slice."
+      },
+      {
         "name": "--recover",
         "summary": "Recover a saved issue draft",
         "status": "unsupported",
         "reason": "Draft recovery is not part of the supported issue maintenance slice."
+      },
+      {
+        "name": "--template",
+        "aliases": [
+          "-T"
+        ],
+        "summary": "Template name to use as starting body text",
+        "status": "unsupported",
+        "reason": "Issue template expansion is not part of the supported issue create slice."
+      },
+      {
+        "name": "--web",
+        "aliases": [
+          "-w"
+        ],
+        "summary": "Open the browser to create an issue",
+        "status": "unsupported",
+        "reason": "Browser-driven issue creation is not part of the supported issue create slice."
       }
     ],
     "issueCommentOptions": [
