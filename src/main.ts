@@ -1,59 +1,13 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-
-import { getInteractiveStdinPrompt, isTokenAuthStdinCommand } from "./command-stdin.js";
+import { readCommandStdin } from "./command-stdin.js";
 import { executeCli } from "./cli.js";
 
-function commandReadsStdin(args: string[]): boolean {
-  const [group, subcommand] = args;
-
-  if (group === "auth") {
-    if (isTokenAuthStdinCommand(args)) {
-      return true;
-    }
-
-    return subcommand === "git-credential";
-  }
-
-  if (group !== "issue" || subcommand !== "edit") {
-    return false;
-  }
-
-  for (let index = 2; index < args.length; index += 1) {
-    const token = args[index];
-
-    if (token === "--body-file" && args[index + 1] === "-") {
-      return true;
-    }
-
-    if (token === "--body-file=-") {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function readCommandStdin(args: string[]): string | undefined {
-  if (!commandReadsStdin(args)) {
-    return undefined;
-  }
-
-  const interactivePrompt = getInteractiveStdinPrompt(args, {
-    isTTY: process.stdin.isTTY,
-    platform: process.platform
-  });
-
-  if (interactivePrompt !== undefined) {
-    process.stderr.write(interactivePrompt);
-  }
-
-  return readFileSync(process.stdin.fd, "utf8");
-}
-
 const args = process.argv.slice(2);
-const stdin = readCommandStdin(args);
+const stdin = await readCommandStdin(args, {
+  stdin: process.stdin,
+  stderr: process.stderr
+});
 const result = await executeCli(args, stdin === undefined ? {} : { stdin });
 
 if (result.stdout.length > 0) {
