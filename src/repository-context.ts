@@ -24,7 +24,7 @@ function resolveSelectedHost(context: ResolvedCliExecutionContext, config: Nativ
 function parseRepositoryTarget(rawRepository: string, context: ResolvedCliExecutionContext): { repository?: RepositoryContext; error?: CliResult } {
   const segments = rawRepository.split("/");
 
-  if (segments.length !== 2 && segments.length !== 3) {
+  if (segments.length < 2) {
     return {
       error: {
         exitCode: 1,
@@ -35,7 +35,10 @@ function parseRepositoryTarget(rawRepository: string, context: ResolvedCliExecut
   }
 
   const config = loadNativeAuthConfig(context);
-  const [explicitHost, owner, repository] = segments.length === 3 ? segments : [undefined, segments[0], segments[1]];
+  const repository = segments.at(-1);
+  const owner = segments.at(-2);
+  const explicitHostSegments = segments.slice(0, -2);
+  const explicitHost = explicitHostSegments.length > 0 ? explicitHostSegments.join("/") : undefined;
 
   if (owner === undefined || repository === undefined || owner.length === 0 || repository.length === 0) {
     return {
@@ -104,9 +107,9 @@ function parseGitRemote(rawRemote: string): RepositoryContext | undefined {
   if (/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(rawRemote)) {
     try {
       const remoteUrl = new URL(rawRemote);
-      const hostname = remoteUrl.port.length > 0 ? `${remoteUrl.hostname}:${remoteUrl.port}` : remoteUrl.hostname;
+      const authority = remoteUrl.port.length > 0 ? `${remoteUrl.hostname}:${remoteUrl.port}` : remoteUrl.hostname;
 
-      return parseRemotePath(hostname, remoteUrl.pathname);
+      return parseRemotePath(`${remoteUrl.protocol}//${authority}`, remoteUrl.pathname);
     } catch {
       return undefined;
     }

@@ -14,6 +14,8 @@ export interface NativeAuthConfig {
   hosts: Record<string, StoredHostCredential>;
 }
 
+const explicitSchemePattern = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//;
+
 function resolveConfigDirectory(context: ResolvedCliExecutionContext): string {
   const env = context.env;
   const homeDirectory = env.HOME ?? homedir();
@@ -75,29 +77,43 @@ export function parseHostname(rawValue: string | undefined): string | undefined 
   }
 
   try {
+    const hasExplicitScheme = explicitSchemePattern.test(trimmedValue);
     const normalizedUrl = new URL(
-      /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmedValue) ? trimmedValue : `https://${trimmedValue}`
+      hasExplicitScheme ? trimmedValue : `https://${trimmedValue}`
     );
 
     if (normalizedUrl.pathname !== "/" && normalizedUrl.pathname !== "") {
       return undefined;
     }
 
-    const portSuffix = normalizedUrl.port.length > 0 ? `:${normalizedUrl.port}` : "";
+    if (normalizedUrl.search.length > 0 || normalizedUrl.hash.length > 0) {
+      return undefined;
+    }
 
-    return `${normalizedUrl.hostname.toLowerCase()}${portSuffix}`;
+    const portSuffix = normalizedUrl.port.length > 0 ? `:${normalizedUrl.port}` : "";
+    const normalizedHost = `${normalizedUrl.hostname.toLowerCase()}${portSuffix}`;
+
+    return hasExplicitScheme ? `${normalizedUrl.protocol}//${normalizedHost}` : normalizedHost;
   } catch {
     return undefined;
   }
 }
 
 export function isEligibleHost(hostname: string): boolean {
-  const hostnameWithoutPort = hostname.split(":")[0] ?? hostname;
+  try {
+    const normalizedUrl = new URL(explicitSchemePattern.test(hostname) ? hostname : `https://${hostname}`);
 
-  return !/(^|\.)github\.com$/i.test(hostnameWithoutPort);
+    return !/(^|\.)github\.com$/i.test(normalizedUrl.hostname);
+  } catch {
+    return false;
+  }
 }
 
 export function buildHostBaseUrl(hostname: string): string {
+  if (explicitSchemePattern.test(hostname)) {
+    return hostname;
+  }
+
   const hostnameWithoutPort = hostname.split(":")[0] ?? hostname;
   const protocol = /^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i.test(hostnameWithoutPort) ? "http" : "https";
 

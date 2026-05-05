@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import {
+  buildHostBaseUrl,
   buildProcessEnv,
   isEligibleHost,
   loadNativeAuthConfig,
@@ -410,8 +411,9 @@ function handleAuthSetupGit(args: string[], context: ResolvedCliExecutionContext
     };
   }
 
-  const helperKey = `credential.https://${credentialResult.credential.hostname}.helper`;
-  const usernameKey = `credential.https://${credentialResult.credential.hostname}.username`;
+  const credentialBaseUrl = buildHostBaseUrl(credentialResult.credential.hostname);
+  const helperKey = `credential.${credentialBaseUrl}.helper`;
+  const usernameKey = `credential.${credentialBaseUrl}.username`;
   const helperValue = `!${supportManifest.cliName} auth git-credential --hostname ${credentialResult.credential.hostname}`;
 
   const helperWrite = spawnSync("git", ["config", "--global", helperKey, helperValue], {

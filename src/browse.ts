@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
-import { buildProcessEnv } from "./host-config.js";
+import { buildHostBaseUrl, buildProcessEnv } from "./host-config.js";
 import { type RepositoryContext, resolveRepositoryContext } from "./repository-context.js";
 
 interface ParsedBrowseFlags {
@@ -137,7 +137,7 @@ function resolveGitBrowseRef(context: ResolvedCliExecutionContext): GitBrowseRef
 }
 
 function synthesizeRepositoryUrl(repository: RepositoryContext): string {
-  return `https://${repository.hostname}/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}`;
+  return `${buildHostBaseUrl(repository.hostname)}/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}`;
 }
 
 function encodeRoutePath(path: string): string {
