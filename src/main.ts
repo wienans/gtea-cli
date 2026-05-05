@@ -2,14 +2,14 @@
 
 import { readFileSync } from "node:fs";
 
-import { getInteractiveStdinPrompt } from "./command-stdin.js";
+import { getInteractiveStdinPrompt, isTokenAuthStdinCommand } from "./command-stdin.js";
 import { executeCli } from "./cli.js";
 
 function commandReadsStdin(args: string[]): boolean {
   const [group, subcommand] = args;
 
   if (group === "auth") {
-    if ((subcommand === "login" || subcommand === "refresh") && args.includes("--with-token")) {
+    if (isTokenAuthStdinCommand(args)) {
       return true;
     }
 

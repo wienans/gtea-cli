@@ -3,7 +3,7 @@ interface InteractiveStdinPromptOptions {
   platform: NodeJS.Platform;
 }
 
-function isInteractiveWithTokenAuthCommand(args: string[]): boolean {
+export function isTokenAuthStdinCommand(args: string[]): boolean {
   const [group, subcommand] = args;
 
   return group === "auth" && (subcommand === "login" || subcommand === "refresh") && args.includes("--with-token");
@@ -13,7 +13,7 @@ export function getInteractiveStdinPrompt(
   args: string[],
   options: InteractiveStdinPromptOptions
 ): string | undefined {
-  if (!options.isTTY || !isInteractiveWithTokenAuthCommand(args)) {
+  if (!options.isTTY || !isTokenAuthStdinCommand(args)) {
     return undefined;
   }
 
