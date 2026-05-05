@@ -81,6 +81,15 @@ test("issue edit help classifies supported and unsupported metadata flags", asyn
   assert.match(result.stdout, /--remove-project[\s\S]*\[unsupported\]/i);
 });
 
+test("issue list help classifies supported and unsupported list flags", async () => {
+  const result = await executeCli(["issue", "list", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--state, -s[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--assignee, -a[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--web, -w[\s\S]*\[unsupported\]/i);
+});
+
 test("issue view reads a single issue from the selected Gitea host", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/issues/42") {
@@ -186,7 +195,6 @@ test("issue view shows a gh-shaped summary with newest comment preview", async (
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-
   const port = getServerPort(server);
 
   try {
@@ -502,6 +510,268 @@ test("issue list accepts an explicit http host-qualified -R target", async () =>
       })
     );
   }
+});
+
+test("issue list supports state filtering with manifest-backed json output fields", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=all") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          id: 4200,
+          number: 42,
+          title: "Ship the issue list slice",
+          state: "closed",
+          body: "List issue body",
+          created_at: "2026-05-04T12:00:00Z",
+          updated_at: "2026-05-05T08:30:00Z",
+          closed_at: "2026-05-05T09:00:00Z",
+          comments: 2,
+          pin_order: 1,
+          user: {
+            id: 7,
+            login: "octocat",
+            full_name: "The Octocat"
+          },
+          assignees: [
+            {
+              id: 11,
+              login: "hubot",
+              full_name: "Hub O. T."
+            }
+          ],
+          labels: [
+            {
+              id: 100,
+              name: "feature",
+              description: "Feature work",
+              color: "00aabb"
+            }
+          ],
+          milestone: {
+            id: 9,
+            title: "Broad First",
+            description: "Ship the next slice",
+            state: "open",
+            created_at: "2026-05-03T10:00:00Z",
+            updated_at: "2026-05-04T10:30:00Z",
+            closed_at: null
+          }
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+  const issueUrl = `http://127.0.0.1:${port}/octo/project/issues/42`;
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--state",
+      "all",
+      "--json",
+      "assignees,author,body,closed,closedAt,comments,createdAt,id,isPinned,labels,milestone,number,state,title,updatedAt,url"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      {
+        assignees: [
+          {
+            id: 11,
+            login: "hubot",
+            name: "Hub O. T."
+          }
+        ],
+        author: {
+          id: 7,
+          login: "octocat",
+          name: "The Octocat"
+        },
+        body: "List issue body",
+        closed: true,
+        closedAt: "2026-05-05T09:00:00Z",
+        comments: 2,
+        createdAt: "2026-05-04T12:00:00Z",
+        id: 4200,
+        isPinned: true,
+        labels: [
+          {
+            id: 100,
+            name: "feature",
+            description: "Feature work",
+            color: "00aabb"
+          }
+        ],
+        milestone: {
+          id: 9,
+          title: "Broad First",
+          description: "Ship the next slice",
+          state: "open",
+          createdAt: "2026-05-03T10:00:00Z",
+          updatedAt: "2026-05-04T10:30:00Z",
+          closedAt: null
+        },
+        number: 42,
+        state: "closed",
+        title: "Ship the issue list slice",
+        updatedAt: "2026-05-05T08:30:00Z",
+        url: issueUrl
+      }
+    ]);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue list reports an empty filtered result using the requested state", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=closed") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify([]));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--state",
+      "closed"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "No closed issues found.\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue list translates supported filters into the Gitea repository issue query", async () => {
+  const server = createServer((request, response) => {
+    if (
+      request.url
+      !== "/api/v1/repos/octo/project/issues?state=open&labels=bug%2Cdocs&q=error&milestones=1&created_by=monalisa&assigned_by=hubot&mentioned_by=reviewer&limit=25"
+    ) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          number: 7,
+          title: "Filter translation works",
+          state: "open"
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--author",
+      "monalisa",
+      "--assignee",
+      "hubot",
+      "--label",
+      "bug",
+      "--label",
+      "docs",
+      "--mention",
+      "reviewer",
+      "--milestone",
+      "1",
+      "--search",
+      "error",
+      "--limit",
+      "25",
+      "--json",
+      "number"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      {
+        number: 7
+      }
+    ]);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue list rejects unsupported web listings explicitly", async () => {
+  const result = await executeCli(["issue", "list", "--web"]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "gtea issue list flag --web is currently unsupported: Browser issue listings with gh-compatible filter propagation are not part of the supported issue list slice.\n"
+  );
 });
 
 test("pr list reads repository pull requests from the selected Gitea host", async () => {
