@@ -69,7 +69,7 @@
         "name": "--jq",
         "summary": "Filter JSON output with jq syntax",
         "status": "emulated",
-        "reason": "Implements the pull request read slice's supported jq field-path subset.",
+        "reason": "Implements the issue read slice's supported jq field-path subset.",
         "requires": [
           "--json"
         ]
@@ -78,10 +78,89 @@
         "name": "--template",
         "summary": "Format JSON output with a Go template",
         "status": "emulated",
-        "reason": "Implements the pull request read slice's supported field-interpolation template subset.",
+        "reason": "Implements the issue read slice's supported field-interpolation template subset.",
         "requires": [
           "--json"
         ]
+      }
+    ],
+    "issueListOptions": [
+      {
+        "name": "--app",
+        "summary": "Filter by GitHub App author",
+        "status": "unsupported",
+        "reason": "Gitea repository issue lists do not expose a GitHub App author filter."
+      },
+      {
+        "name": "--assignee",
+        "aliases": [
+          "-a"
+        ],
+        "summary": "Filter by assignee",
+        "status": "supported"
+      },
+      {
+        "name": "--author",
+        "aliases": [
+          "-A"
+        ],
+        "summary": "Filter by author",
+        "status": "supported"
+      },
+      {
+        "name": "--label",
+        "aliases": [
+          "-l"
+        ],
+        "summary": "Filter by label",
+        "status": "supported"
+      },
+      {
+        "name": "--limit",
+        "aliases": [
+          "-L"
+        ],
+        "summary": "Maximum number of issues to fetch",
+        "status": "supported"
+      },
+      {
+        "name": "--mention",
+        "summary": "Filter by mention",
+        "status": "supported"
+      },
+      {
+        "name": "--milestone",
+        "aliases": [
+          "-m"
+        ],
+        "summary": "Filter by milestone number or title",
+        "status": "supported"
+      },
+      {
+        "name": "--search",
+        "aliases": [
+          "-S"
+        ],
+        "summary": "Search issues with query",
+        "status": "emulated",
+        "reason": "Maps the raw search string to Gitea's repository issue query parameter rather than GitHub's full advanced issue-search syntax."
+      },
+      {
+        "name": "--state",
+        "aliases": [
+          "-s"
+        ],
+        "summary": "Filter by state: {open|closed|all}",
+        "status": "supported"
+      },
+      {
+        "name": "--web",
+        "aliases": [
+          "-w"
+        ],
+        "summary": "List issues in the web browser",
+        "status": "unsupported",
+        "reason": "Opening filtered issue lists in the browser is not part of the supported issue list slice."
       }
     ],
     "issueViewOptions": [
@@ -278,6 +357,118 @@
       {
         "name": "state",
         "summary": "Issue state",
+        "status": "supported"
+      },
+      {
+        "name": "url",
+        "summary": "Issue web URL",
+        "status": "supported"
+      }
+    ],
+    "issueListRead": [
+      {
+        "name": "assignees",
+        "summary": "Issue assignees",
+        "status": "supported"
+      },
+      {
+        "name": "author",
+        "summary": "Issue author",
+        "status": "supported"
+      },
+      {
+        "name": "body",
+        "summary": "Issue body",
+        "status": "supported"
+      },
+      {
+        "name": "closed",
+        "summary": "Whether the issue is closed",
+        "status": "supported"
+      },
+      {
+        "name": "closedAt",
+        "summary": "Issue closed timestamp",
+        "status": "supported"
+      },
+      {
+        "name": "closedByPullRequestsReferences",
+        "summary": "Pull requests that closed the issue",
+        "status": "unsupported",
+        "reason": "Gitea repository issue lists do not expose compatible closing pull request references."
+      },
+      {
+        "name": "comments",
+        "summary": "Issue comment count",
+        "status": "supported"
+      },
+      {
+        "name": "createdAt",
+        "summary": "Issue creation timestamp",
+        "status": "supported"
+      },
+      {
+        "name": "id",
+        "summary": "Issue identifier",
+        "status": "supported"
+      },
+      {
+        "name": "isPinned",
+        "summary": "Whether the issue is pinned",
+        "status": "supported"
+      },
+      {
+        "name": "labels",
+        "summary": "Issue labels",
+        "status": "supported"
+      },
+      {
+        "name": "milestone",
+        "summary": "Issue milestone",
+        "status": "supported"
+      },
+      {
+        "name": "number",
+        "summary": "Issue number",
+        "status": "supported"
+      },
+      {
+        "name": "projectCards",
+        "summary": "Classic project cards",
+        "status": "unsupported",
+        "reason": "Project card metadata remains outside the supported issue list slice."
+      },
+      {
+        "name": "projectItems",
+        "summary": "Project items",
+        "status": "unsupported",
+        "reason": "Project item metadata remains outside the supported issue list slice."
+      },
+      {
+        "name": "reactionGroups",
+        "summary": "Issue reaction groups",
+        "status": "unsupported",
+        "reason": "Reaction aggregation is not part of the supported issue list slice."
+      },
+      {
+        "name": "state",
+        "summary": "Issue state",
+        "status": "supported"
+      },
+      {
+        "name": "stateReason",
+        "summary": "Issue state reason",
+        "status": "unsupported",
+        "reason": "Gitea issue state does not expose a compatible state reason in repository issue lists."
+      },
+      {
+        "name": "title",
+        "summary": "Issue title",
+        "status": "supported"
+      },
+      {
+        "name": "updatedAt",
+        "summary": "Issue updated timestamp",
         "status": "supported"
       },
       {
@@ -577,10 +768,11 @@
           "status": "supported",
           "flagProfiles": [
             "issueRepositoryTarget",
+            "issueListOptions",
             "issueStructuredOutput"
           ],
           "outputProfiles": [
-            "issueRead"
+            "issueListRead"
           ]
         },
         {

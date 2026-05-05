@@ -15,6 +15,27 @@ interface ParsedIssueFlags {
   jqExpression?: string;
   template?: string;
   showComments?: boolean;
+  assignee?: string;
+  author?: string;
+  labels?: string[];
+  limit?: number;
+  mention?: string;
+  milestone?: string;
+  search?: string;
+  state?: IssueListState;
+}
+
+type IssueListState = "open" | "closed" | "all";
+
+interface IssueListQueryOptions {
+  assignee?: string;
+  author?: string;
+  labels: string[];
+  limit?: number;
+  mention?: string;
+  milestone?: string;
+  search?: string;
+  state: IssueListState;
 }
 
 interface ParsedIssueCreateFlags {
@@ -53,7 +74,7 @@ interface IssueRecord {
   authorLogin?: string;
   labelNames?: string[];
   commentCount?: number;
-  comments?: IssueCommentRecord[];
+  comments?: number | IssueCommentRecord[];
   milestone?: IssueMilestoneRecord | null;
   createdAt?: string;
   updatedAt?: string;
@@ -235,7 +256,50 @@ function parseCsvValues(rawValue: string): string[] {
     .filter((value) => value.length > 0);
 }
 
-function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: CliResult } {
+function parsePositiveIntegerFlagValue(flag: string, rawValue: string): { value?: number; error?: CliResult } {
+  if (!/^\d+$/.test(rawValue)) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Invalid value for ${flag}: ${rawValue}. Expected a positive integer.\n`
+      }
+    };
+  }
+
+  const value = Number.parseInt(rawValue, 10);
+
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Invalid value for ${flag}: ${rawValue}. Expected a positive integer.\n`
+      }
+    };
+  }
+
+  return { value };
+}
+
+function parseIssueState(rawValue: string): { state?: IssueListState; error?: CliResult } {
+  if (rawValue === "open" || rawValue === "closed" || rawValue === "all") {
+    return { state: rawValue };
+  }
+
+  return {
+    error: {
+      exitCode: 1,
+      stdout: "",
+      stderr: `Invalid value for --state: ${rawValue}. Expected one of: open, closed, all.\n`
+    }
+  };
+}
+
+function parseIssueFlags(
+  args: string[],
+  subcommand: "view" | "list" | "status"
+): { flags: ParsedIssueFlags; error?: CliResult } {
   const flags: ParsedIssueFlags = {};
 
   for (let index = 0; index < args.length; index += 1) {
@@ -311,6 +375,174 @@ function parseIssueFlags(args: string[]): { flags: ParsedIssueFlags; error?: Cli
     if (token === "--comments") {
       flags.showComments = true;
       continue;
+    }
+
+    if (subcommand === "list") {
+      if (token === "--app" || token.startsWith("--app=")) {
+        return {
+          flags,
+          error: renderUnsupportedIssueFlag(
+            "list",
+            "--app",
+            "Gitea repository issue lists do not expose a GitHub App author filter."
+          )
+        };
+      }
+
+      if (token === "--web" || token === "-w") {
+        return {
+          flags,
+          error: renderUnsupportedIssueFlag(
+            "list",
+            "--web",
+            "Browser issue listings with gh-compatible filter propagation are not part of the supported issue list slice."
+          )
+        };
+      }
+
+      const assigneeFlag = parseStringFlagValue(args, index, { long: "--assignee", short: "-a" });
+
+      if (assigneeFlag.error !== undefined) {
+        return {
+          flags,
+          error: assigneeFlag.error
+        };
+      }
+
+      if (assigneeFlag.handled && assigneeFlag.value !== undefined) {
+        flags.assignee = assigneeFlag.value;
+        index = assigneeFlag.nextIndex;
+        continue;
+      }
+
+      const authorFlag = parseStringFlagValue(args, index, { long: "--author", short: "-A" });
+
+      if (authorFlag.error !== undefined) {
+        return {
+          flags,
+          error: authorFlag.error
+        };
+      }
+
+      if (authorFlag.handled && authorFlag.value !== undefined) {
+        flags.author = authorFlag.value;
+        index = authorFlag.nextIndex;
+        continue;
+      }
+
+      const labelFlag = parseStringFlagValue(args, index, { long: "--label", short: "-l" });
+
+      if (labelFlag.error !== undefined) {
+        return {
+          flags,
+          error: labelFlag.error
+        };
+      }
+
+      if (labelFlag.handled && labelFlag.value !== undefined) {
+        flags.labels = [...(flags.labels ?? []), ...parseCsvValues(labelFlag.value)];
+        index = labelFlag.nextIndex;
+        continue;
+      }
+
+      const limitFlag = parseStringFlagValue(args, index, { long: "--limit", short: "-L" });
+
+      if (limitFlag.error !== undefined) {
+        return {
+          flags,
+          error: limitFlag.error
+        };
+      }
+
+      if (limitFlag.handled && limitFlag.value !== undefined) {
+        const parsedLimit = parsePositiveIntegerFlagValue("--limit", limitFlag.value);
+
+        if (parsedLimit.error !== undefined) {
+          return {
+            flags,
+            error: parsedLimit.error
+          };
+        }
+
+        if (parsedLimit.value !== undefined) {
+          flags.limit = parsedLimit.value;
+        }
+
+        index = limitFlag.nextIndex;
+        continue;
+      }
+
+      const mentionFlag = parseStringFlagValue(args, index, { long: "--mention" });
+
+      if (mentionFlag.error !== undefined) {
+        return {
+          flags,
+          error: mentionFlag.error
+        };
+      }
+
+      if (mentionFlag.handled && mentionFlag.value !== undefined) {
+        flags.mention = mentionFlag.value;
+        index = mentionFlag.nextIndex;
+        continue;
+      }
+
+      const milestoneFlag = parseStringFlagValue(args, index, { long: "--milestone", short: "-m" });
+
+      if (milestoneFlag.error !== undefined) {
+        return {
+          flags,
+          error: milestoneFlag.error
+        };
+      }
+
+      if (milestoneFlag.handled && milestoneFlag.value !== undefined) {
+        flags.milestone = milestoneFlag.value;
+        index = milestoneFlag.nextIndex;
+        continue;
+      }
+
+      const searchFlag = parseStringFlagValue(args, index, { long: "--search", short: "-S" });
+
+      if (searchFlag.error !== undefined) {
+        return {
+          flags,
+          error: searchFlag.error
+        };
+      }
+
+      if (searchFlag.handled && searchFlag.value !== undefined) {
+        flags.search = searchFlag.value;
+        index = searchFlag.nextIndex;
+        continue;
+      }
+
+      const stateFlag = parseStringFlagValue(args, index, { long: "--state", short: "-s" });
+
+      if (stateFlag.error !== undefined) {
+        return {
+          flags,
+          error: stateFlag.error
+        };
+      }
+
+      if (stateFlag.handled && stateFlag.value !== undefined) {
+        const parsedState = parseIssueState(stateFlag.value);
+
+        if (parsedState.error !== undefined) {
+          return {
+            flags,
+            error: parsedState.error
+          };
+        }
+
+        if (parsedState.state !== undefined) {
+          flags.state = parsedState.state;
+        }
+
+        index = stateFlag.nextIndex;
+        continue;
+      }
     }
 
     if (token.startsWith("-")) {
@@ -970,12 +1202,129 @@ function mapIssueRecord(repository: RepositoryContext, payload: GiteaIssuePayloa
     ...(author === null ? {} : { author }),
     ...(authorLogin === undefined ? {} : { authorLogin }),
     ...(labelNames.length === 0 ? {} : { labelNames }),
-    ...(commentCount === undefined ? {} : { commentCount }),
+    ...(commentCount === undefined ? {} : { commentCount, comments: commentCount }),
     ...(milestone === null ? {} : { milestone }),
     ...(createdAt === undefined ? {} : { createdAt }),
     ...(updatedAt === undefined ? {} : { updatedAt }),
     ...(closedAt === undefined ? {} : { closedAt })
   };
+}
+
+async function resolveIssueListFilterUser(
+  rawValue: string | undefined,
+  repository: RepositoryContext,
+  context: ResolvedCliExecutionContext
+): Promise<{ value?: string; error?: CliResult }> {
+  if (rawValue === undefined || rawValue !== "@me") {
+    return rawValue === undefined ? {} : { value: rawValue };
+  }
+
+  const currentUserResult = await readCurrentUser(repository.hostname, context, "list");
+
+  if (currentUserResult.error !== undefined || currentUserResult.login === undefined) {
+    return {
+      error: currentUserResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to resolve the current user.\n"
+      }
+    };
+  }
+
+  return { value: currentUserResult.login };
+}
+
+async function resolveIssueListQueryOptions(
+  flags: ParsedIssueFlags,
+  repository: RepositoryContext,
+  context: ResolvedCliExecutionContext
+): Promise<{ options?: IssueListQueryOptions; error?: CliResult }> {
+  const assigneeResult = await resolveIssueListFilterUser(flags.assignee, repository, context);
+
+  if (assigneeResult.error !== undefined) {
+    return { error: assigneeResult.error };
+  }
+
+  const authorResult = await resolveIssueListFilterUser(flags.author, repository, context);
+
+  if (authorResult.error !== undefined) {
+    return { error: authorResult.error };
+  }
+
+  const mentionResult = await resolveIssueListFilterUser(flags.mention, repository, context);
+
+  if (mentionResult.error !== undefined) {
+    return { error: mentionResult.error };
+  }
+
+  const options: IssueListQueryOptions = {
+    labels: flags.labels ?? [],
+    state: flags.state ?? "open"
+  };
+
+  if (assigneeResult.value !== undefined) {
+    options.assignee = assigneeResult.value;
+  }
+
+  if (authorResult.value !== undefined) {
+    options.author = authorResult.value;
+  }
+
+  if (flags.limit !== undefined) {
+    options.limit = flags.limit;
+  }
+
+  if (mentionResult.value !== undefined) {
+    options.mention = mentionResult.value;
+  }
+
+  if (flags.milestone !== undefined) {
+    options.milestone = flags.milestone;
+  }
+
+  if (flags.search !== undefined) {
+    options.search = flags.search;
+  }
+
+  return {
+    options
+  };
+}
+
+function buildIssueListRequestUrl(repository: RepositoryContext, options: IssueListQueryOptions): string {
+  const params = new URLSearchParams();
+
+  params.set("state", options.state);
+
+  if (options.labels.length > 0) {
+    params.set("labels", options.labels.join(","));
+  }
+
+  if (options.search !== undefined) {
+    params.set("q", options.search);
+  }
+
+  if (options.milestone !== undefined) {
+    params.set("milestones", options.milestone);
+  }
+
+  if (options.author !== undefined) {
+    params.set("created_by", options.author);
+  }
+
+  if (options.assignee !== undefined) {
+    params.set("assigned_by", options.assignee);
+  }
+
+  if (options.mention !== undefined) {
+    params.set("mentioned_by", options.mention);
+  }
+
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+
+  return `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues?${params.toString()}`;
 }
 
 async function readIssue(
@@ -1725,9 +2074,10 @@ async function planIssueEditMutations(
 
 async function readIssueList(
   repository: RepositoryContext,
-  context: ResolvedCliExecutionContext
+  context: ResolvedCliExecutionContext,
+  options: IssueListQueryOptions = { labels: [], state: "open" }
 ): Promise<{ issues?: IssueRecord[]; payload?: GiteaIssuePayload[]; error?: CliResult }> {
-  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues?state=open`;
+  const requestUrl = buildIssueListRequestUrl(repository, options);
   const token = resolveOptionalToken(repository.hostname, context);
 
   try {
@@ -1768,7 +2118,7 @@ async function readIssueList(
 async function readCurrentUser(
   hostname: string,
   context: ResolvedCliExecutionContext,
-  commandName: "status" | "edit" = "status"
+  commandName: "list" | "status" | "edit" = "status"
 ): Promise<{ login?: string; error?: CliResult }> {
   const token = resolveOptionalToken(hostname, context);
 
@@ -1848,7 +2198,7 @@ function renderIssue(issue: IssueRecord, options?: { showAllComments?: boolean }
     lines.push("", issue.body);
   }
 
-  if (issue.comments !== undefined && issue.comments.length > 0) {
+  if (Array.isArray(issue.comments) && issue.comments.length > 0) {
     if (options?.showAllComments === true) {
       for (const comment of issue.comments) {
         const commentAuthorLogin = comment.author?.login ?? comment.authorLogin ?? undefined;
@@ -2321,7 +2671,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     };
   }
 
-  const parsedFlags = parseIssueFlags(args.slice(2));
+  const parsedFlags = parseIssueFlags(args.slice(2), subcommand);
 
   if (parsedFlags.error !== undefined) {
     return parsedFlags.error;
@@ -2386,7 +2736,21 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   }
 
   if (subcommand === "list") {
-    const issueListResult = await readIssueList(repositoryResult.repository, context);
+    const queryOptionsResult = await resolveIssueListQueryOptions(
+      parsedFlags.flags,
+      repositoryResult.repository,
+      context
+    );
+
+    if (queryOptionsResult.error !== undefined || queryOptionsResult.options === undefined) {
+      return queryOptionsResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to resolve issue list filters.\n"
+      };
+    }
+
+    const issueListResult = await readIssueList(repositoryResult.repository, context, queryOptionsResult.options);
 
     if (issueListResult.error !== undefined || issueListResult.issues === undefined) {
       return issueListResult.error ?? {
