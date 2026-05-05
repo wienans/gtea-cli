@@ -2015,6 +2015,170 @@ test("issue create applies supported assignee, label, and milestone metadata fla
   }
 });
 
+test("issue create reports create-scoped lookup failures during metadata planning", async () => {
+  let sawCreate = false;
+  let sawIssueRead = false;
+  let sawLabelUpdate = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/v1/repos/octo/project/issues") {
+      sawCreate = true;
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({ number: 22, title: "Create with labels", state: "open" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/issues/22") {
+      sawIssueRead = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ number: 22, title: "Create with labels", state: "open", labels: [] }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/labels") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "PUT" && request.url === "/api/v1/repos/octo/project/issues/22/labels") {
+      sawLabelUpdate = true;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Create with labels",
+      "--label",
+      "triage"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /authentication failed while creating issue #22 on 127\.0\.0\.1:/i);
+    assert.doesNotMatch(result.stderr, /editing issue/i);
+    assert.equal(sawCreate, true);
+    assert.equal(sawIssueRead, true);
+    assert.equal(sawLabelUpdate, false);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue create reports create-scoped label update failures", async () => {
+  let sawCreate = false;
+  let sawLabelUpdate = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/v1/repos/octo/project/issues") {
+      sawCreate = true;
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({ number: 23, title: "Create with labels", state: "open" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/issues/23") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ number: 23, title: "Create with labels", state: "open", labels: [] }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/labels") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([{ id: 4, name: "triage" }]));
+      return;
+    }
+
+    if (request.method === "PUT" && request.url === "/api/v1/repos/octo/project/issues/23/labels") {
+      sawLabelUpdate = true;
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--title",
+      "Create with labels",
+      "--label",
+      "triage"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /authentication failed while creating issue #23 on 127\.0\.0\.1:/i);
+    assert.doesNotMatch(result.stderr, /editing issue/i);
+    assert.equal(sawCreate, true);
+    assert.equal(sawLabelUpdate, true);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("pr diff prints the unified diff for the selected pull request", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/pulls/42.diff") {

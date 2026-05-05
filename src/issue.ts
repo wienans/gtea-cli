@@ -66,6 +66,12 @@ interface ParsedIssueMutationFlags {
   removeMilestone?: boolean;
 }
 
+type IssueMutationCommandName = "create" | "edit";
+
+function issueMutationActionLabel(commandName: IssueMutationCommandName): "creating" | "editing" {
+  return commandName === "create" ? "creating" : "editing";
+}
+
 interface IssueRecord {
   number: number;
   title: string;
@@ -1632,9 +1638,11 @@ async function readIssueEditLookupPayload<T>(
   repository: RepositoryContext,
   issueNumber: number,
   requestUrl: string,
-  context: ResolvedCliExecutionContext
+  context: ResolvedCliExecutionContext,
+  commandName: IssueMutationCommandName
 ): Promise<{ payload: T } | { error: CliResult }> {
   const token = resolveOptionalToken(repository.hostname, context);
+  const actionLabel = issueMutationActionLabel(commandName);
 
   try {
     const response = await fetch(requestUrl, {
@@ -1648,7 +1656,7 @@ async function readIssueEditLookupPayload<T>(
         error: {
           exitCode: 1,
           stdout: "",
-          stderr: `Authentication failed while editing issue #${issueNumber} on ${repository.hostname}.\n`
+          stderr: `Authentication failed while ${actionLabel} issue #${issueNumber} on ${repository.hostname}.\n`
         }
       };
     }
@@ -1658,7 +1666,7 @@ async function readIssueEditLookupPayload<T>(
         error: {
           exitCode: 1,
           stdout: "",
-          stderr: `Gitea returned ${response.status} while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+          stderr: `Gitea returned ${response.status} while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
         }
       };
     }
@@ -1682,14 +1690,16 @@ async function readIssueEditLookupPayload<T>(
 async function readRepositoryLabels(
   repository: RepositoryContext,
   issueNumber: number,
-  context: ResolvedCliExecutionContext
+  context: ResolvedCliExecutionContext,
+  commandName: IssueMutationCommandName
 ): Promise<{ labels?: GiteaLabelPayload[]; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels`;
   const result = await readIssueEditLookupPayload<GiteaLabelPayload[]>(
     repository,
     issueNumber,
     requestUrl,
-    context
+    context,
+    commandName
   );
 
   return "error" in result
@@ -1700,14 +1710,16 @@ async function readRepositoryLabels(
 async function readRepositoryMilestones(
   repository: RepositoryContext,
   issueNumber: number,
-  context: ResolvedCliExecutionContext
+  context: ResolvedCliExecutionContext,
+  commandName: IssueMutationCommandName
 ): Promise<{ milestones?: GiteaMilestonePayload[]; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/milestones?state=all`;
   const result = await readIssueEditLookupPayload<GiteaMilestonePayload[]>(
     repository,
     issueNumber,
     requestUrl,
-    context
+    context,
+    commandName
   );
 
   return "error" in result
@@ -1989,16 +2001,18 @@ async function replaceIssueLabels(
   repository: RepositoryContext,
   issueNumber: number,
   labelIds: number[],
-  context: ResolvedCliExecutionContext
+  context: ResolvedCliExecutionContext,
+  commandName: IssueMutationCommandName
 ): Promise<{ error?: CliResult }> {
   const token = resolveOptionalToken(repository.hostname, context);
+  const actionLabel = issueMutationActionLabel(commandName);
 
   if (token === undefined) {
     return {
       error: {
         exitCode: 1,
         stdout: "",
-        stderr: "gtea issue edit requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+        stderr: `gtea issue ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
       }
     };
   }
@@ -2020,7 +2034,7 @@ async function replaceIssueLabels(
         error: {
           exitCode: 1,
           stdout: "",
-          stderr: `Authentication failed while editing issue #${issueNumber} on ${repository.hostname}.\n`
+          stderr: `Authentication failed while ${actionLabel} issue #${issueNumber} on ${repository.hostname}.\n`
         }
       };
     }
@@ -2043,8 +2057,8 @@ async function replaceIssueLabels(
           exitCode: 1,
           stdout: "",
           stderr: validationMessage === undefined
-            ? `Validation failed while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
-            : `Validation failed while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+            ? `Validation failed while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
         }
       };
     }
@@ -2054,7 +2068,7 @@ async function replaceIssueLabels(
         error: {
           exitCode: 1,
           stdout: "",
-          stderr: `Gitea returned ${response.status} while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
+          stderr: `Gitea returned ${response.status} while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}.\n`
         }
       };
     }
@@ -2067,7 +2081,7 @@ async function replaceIssueLabels(
       error: {
         exitCode: 1,
         stdout: "",
-        stderr: `Failed to edit issue #${issueNumber} on ${repository.hostname}: ${message}\n`
+        stderr: `Failed to ${commandName} issue #${issueNumber} on ${repository.hostname}: ${message}\n`
       }
     };
   }
@@ -2078,8 +2092,11 @@ async function planIssueEditMutations(
   issueNumber: number,
   flags: ParsedIssueMutationFlags,
   body: string | undefined,
-  context: ResolvedCliExecutionContext
+  context: ResolvedCliExecutionContext,
+  commandName: IssueMutationCommandName = "edit"
 ): Promise<{ patchPayload: IssueUpdatePayload; labelIds?: number[]; error?: CliResult }> {
+  const actionLabel = issueMutationActionLabel(commandName);
+
   if (flags.milestone !== undefined && flags.removeMilestone === true) {
     return {
       patchPayload: {},
@@ -2119,7 +2136,7 @@ async function planIssueEditMutations(
     let currentUserLogin: string | undefined;
 
     if (flags.addAssignees.includes("@me") || flags.removeAssignees.includes("@me")) {
-      const currentUserResult = await readCurrentUser(repository.hostname, context, "edit");
+      const currentUserResult = await readCurrentUser(repository.hostname, context, commandName);
 
       if (currentUserResult.error !== undefined || currentUserResult.login === undefined) {
         return {
@@ -2127,7 +2144,7 @@ async function planIssueEditMutations(
           error: currentUserResult.error ?? {
             exitCode: 1,
             stdout: "",
-            stderr: `Failed to resolve @me while editing issue #${issueNumber}.\n`
+            stderr: `Failed to resolve @me while ${actionLabel} issue #${issueNumber}.\n`
           }
         };
       }
@@ -2143,7 +2160,7 @@ async function planIssueEditMutations(
   }
 
   if (flags.milestone !== undefined) {
-    const milestoneResult = await readRepositoryMilestones(repository, issueNumber, context);
+    const milestoneResult = await readRepositoryMilestones(repository, issueNumber, context, commandName);
 
     if (milestoneResult.error !== undefined || milestoneResult.milestones === undefined) {
       return {
@@ -2151,7 +2168,7 @@ async function planIssueEditMutations(
         error: milestoneResult.error ?? {
           exitCode: 1,
           stdout: "",
-          stderr: `Failed to resolve milestone while editing issue #${issueNumber}.\n`
+          stderr: `Failed to resolve milestone while ${actionLabel} issue #${issueNumber}.\n`
         }
       };
     }
@@ -2166,7 +2183,7 @@ async function planIssueEditMutations(
         error: {
           exitCode: 1,
           stdout: "",
-          stderr: `Validation failed while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}: milestone \"${flags.milestone}\" was not found.\n`
+          stderr: `Validation failed while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}: milestone "${flags.milestone}" was not found.\n`
         }
       };
     }
@@ -2182,7 +2199,7 @@ async function planIssueEditMutations(
     return { patchPayload };
   }
 
-  const labelResult = await readRepositoryLabels(repository, issueNumber, context);
+  const labelResult = await readRepositoryLabels(repository, issueNumber, context, commandName);
 
   if (labelResult.error !== undefined || labelResult.labels === undefined) {
     return {
@@ -2190,7 +2207,7 @@ async function planIssueEditMutations(
       error: labelResult.error ?? {
         exitCode: 1,
         stdout: "",
-        stderr: `Failed to resolve labels while editing issue #${issueNumber}.\n`
+        stderr: `Failed to resolve labels while ${actionLabel} issue #${issueNumber}.\n`
       }
     };
   }
@@ -2216,7 +2233,7 @@ async function planIssueEditMutations(
         error: {
           exitCode: 1,
           stdout: "",
-          stderr: `Validation failed while editing issue #${issueNumber} in ${repository.owner}/${repository.repository}: label \"${labelName}\" was not found.\n`
+          stderr: `Validation failed while ${actionLabel} issue #${issueNumber} in ${repository.owner}/${repository.repository}: label "${labelName}" was not found.\n`
         }
       };
     }
@@ -2266,7 +2283,8 @@ async function applyIssueMutationPlan(
       repository,
       issueNumber,
       plan.labelIds,
-      context
+      context,
+      commandName
     );
 
     if (labelResult.error !== undefined) {
@@ -2325,7 +2343,7 @@ async function readIssueList(
 async function readCurrentUser(
   hostname: string,
   context: ResolvedCliExecutionContext,
-  commandName: "list" | "status" | "edit" = "status"
+  commandName: "create" | "list" | "status" | "edit" = "status"
 ): Promise<{ login?: string; error?: CliResult }> {
   const token = resolveOptionalToken(hostname, context);
 
@@ -2618,7 +2636,8 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
         createResult.issue.number,
         createMetadataFlags,
         undefined,
-        context
+        context,
+        "create"
       );
 
       if (metadataPlanResult.error !== undefined) {
