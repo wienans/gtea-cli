@@ -1,8 +1,27 @@
 import assert from "node:assert/strict";
+import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 
 import { getInteractiveStdinPrompt, isTokenAuthStdinCommand, readCommandStdin } from "../src/command-stdin.js";
+
+async function withNonInteractiveStdin<T>(content: string, run: (stdin: NodeJS.ReadStream & { fd: number }) => Promise<T>): Promise<T> {
+  const directory = mkdtempSync(join(tmpdir(), "gtea-command-stdin-"));
+  const filePath = join(directory, "stdin.txt");
+
+  writeFileSync(filePath, content, "utf8");
+
+  const fd = openSync(filePath, "r");
+
+  try {
+    return await run({ fd, isTTY: false } as NodeJS.ReadStream & { fd: number });
+  } finally {
+    closeSync(fd);
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
 
 test("token auth stdin detection covers login and refresh only when --with-token is present", () => {
   assert.equal(isTokenAuthStdinCommand(["auth", "login", "--with-token"]), true);
@@ -55,6 +74,36 @@ test("interactive auth token reads a single submitted line from a TTY", async ()
 
   assert.equal(value, "tty-token");
   assert.equal(stderrChunks.join(""), "Paste the Personal Access Token and press Enter to submit.\n");
+});
+
+test("non-interactive auth token reads the full stdin stream unchanged", async () => {
+  const stdinValue = "line-one\nline-two\n";
+
+  const value = await withNonInteractiveStdin(stdinValue, async (stdin) => readCommandStdin(["auth", "login", "--with-token"], {
+    stdin,
+    stderr: {
+      write() {
+        return true;
+      }
+    }
+  }));
+
+  assert.equal(value, stdinValue);
+});
+
+test("issue edit body-file dash still reads stdin from non-interactive input", async () => {
+  const stdinValue = "updated issue body\nwith multiple lines\n";
+
+  const value = await withNonInteractiveStdin(stdinValue, async (stdin) => readCommandStdin(["issue", "edit", "123", "--body-file", "-"], {
+    stdin,
+    stderr: {
+      write() {
+        return true;
+      }
+    }
+  }));
+
+  assert.equal(value, stdinValue);
 });
 
 test("interactive auth token prompts stay quiet for non-interactive or unrelated commands", () => {
