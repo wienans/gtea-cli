@@ -436,6 +436,34 @@ function renderStructuredRepoOutput(
   };
 }
 
+function validateStructuredRepoFlags(flags: ParsedRepoFlags): CliResult | undefined {
+  if (flags.jqExpression !== undefined && flags.jsonFields === undefined) {
+    return {
+      exitCode: 1,
+      stdout: "",
+      stderr: "--jq requires --json.\n"
+    };
+  }
+
+  if (flags.template !== undefined && flags.jsonFields === undefined) {
+    return {
+      exitCode: 1,
+      stdout: "",
+      stderr: "--template requires --json.\n"
+    };
+  }
+
+  if (flags.template !== undefined && flags.jqExpression !== undefined) {
+    return {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Choose at most one of --jq and --template.\n"
+    };
+  }
+
+  return undefined;
+}
+
 async function resolveCloneSource(
   repository: RepositoryContext,
   context: ResolvedCliExecutionContext
@@ -526,6 +554,12 @@ export async function executeRepoCommand(args: string[], context: ResolvedCliExe
 
   if (flagsError !== undefined) {
     return flagsError;
+  }
+
+  const structuredFlagsError = validateStructuredRepoFlags(flags);
+
+  if (structuredFlagsError !== undefined) {
+    return structuredFlagsError;
   }
 
   const { repository, error: repositoryError } = resolveRepositoryContext(flags.repository, context);

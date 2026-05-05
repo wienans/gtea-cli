@@ -91,6 +91,53 @@ test("repo view reads a single repository from the selected Gitea host", async (
   }
 });
 
+test("repo view requires --json when --jq is provided", async () => {
+  const result = await executeCli([
+    "repo",
+    "view",
+    "-R",
+    "https://example.com/octo/project",
+    "--jq",
+    ".name"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "--jq requires --json.\n");
+});
+
+test("repo list rejects --template without --json and disallows combining it with --jq", async () => {
+  const missingJsonResult = await executeCli([
+    "repo",
+    "list",
+    "-R",
+    "https://example.com/octo/project",
+    "--template",
+    "{{.name}}"
+  ]);
+
+  assert.equal(missingJsonResult.exitCode, 1);
+  assert.equal(missingJsonResult.stdout, "");
+  assert.equal(missingJsonResult.stderr, "--template requires --json.\n");
+
+  const conflictingFlagsResult = await executeCli([
+    "repo",
+    "list",
+    "-R",
+    "https://example.com/octo/project",
+    "--json",
+    "name",
+    "--jq",
+    ".[].name",
+    "--template",
+    "{{.name}}"
+  ]);
+
+  assert.equal(conflictingFlagsResult.exitCode, 1);
+  assert.equal(conflictingFlagsResult.stdout, "");
+  assert.equal(conflictingFlagsResult.stderr, "Choose at most one of --jq and --template.\n");
+});
+
 test("repo list reads repositories for the selected owner on the selected Gitea host", async () => {
   let port = 0;
 
