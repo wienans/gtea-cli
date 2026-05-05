@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 
+import { getInteractiveStdinPrompt } from "./command-stdin.js";
 import { executeCli } from "./cli.js";
 
 function commandReadsStdin(args: string[]): boolean {
@@ -39,8 +40,13 @@ function readCommandStdin(args: string[]): string | undefined {
     return undefined;
   }
 
-  if (process.stdin.isTTY && (args[1] === "login" || args[1] === "refresh") && args.includes("--with-token")) {
-    process.stderr.write("Paste the Personal Access Token, then press Ctrl+D to submit.\n");
+  const interactivePrompt = getInteractiveStdinPrompt(args, {
+    isTTY: process.stdin.isTTY,
+    platform: process.platform
+  });
+
+  if (interactivePrompt !== undefined) {
+    process.stderr.write(interactivePrompt);
   }
 
   return readFileSync(process.stdin.fd, "utf8");
