@@ -286,6 +286,118 @@
         "status": "supported"
       }
     ],
+    "issueViewRead": [
+      {
+        "name": "assignees",
+        "summary": "Issue assignees",
+        "status": "supported"
+      },
+      {
+        "name": "author",
+        "summary": "Issue author",
+        "status": "supported"
+      },
+      {
+        "name": "body",
+        "summary": "Issue body",
+        "status": "supported"
+      },
+      {
+        "name": "closed",
+        "summary": "Whether the issue is closed",
+        "status": "supported"
+      },
+      {
+        "name": "closedAt",
+        "summary": "Issue closed timestamp",
+        "status": "supported"
+      },
+      {
+        "name": "closedByPullRequestsReferences",
+        "summary": "Pull requests that closed the issue",
+        "status": "unsupported",
+        "reason": "Gitea issue detail does not expose compatible closing pull request references in the supported issue view slice."
+      },
+      {
+        "name": "comments",
+        "summary": "Issue comments",
+        "status": "supported"
+      },
+      {
+        "name": "createdAt",
+        "summary": "Issue creation timestamp",
+        "status": "supported"
+      },
+      {
+        "name": "id",
+        "summary": "Issue identifier",
+        "status": "supported"
+      },
+      {
+        "name": "isPinned",
+        "summary": "Whether the issue is pinned",
+        "status": "supported"
+      },
+      {
+        "name": "labels",
+        "summary": "Issue labels",
+        "status": "supported"
+      },
+      {
+        "name": "milestone",
+        "summary": "Issue milestone",
+        "status": "supported"
+      },
+      {
+        "name": "number",
+        "summary": "Issue number",
+        "status": "supported"
+      },
+      {
+        "name": "projectCards",
+        "summary": "Classic project cards",
+        "status": "unsupported",
+        "reason": "Project card metadata remains outside the supported issue view slice."
+      },
+      {
+        "name": "projectItems",
+        "summary": "Project items",
+        "status": "unsupported",
+        "reason": "Project item metadata remains outside the supported issue view slice."
+      },
+      {
+        "name": "reactionGroups",
+        "summary": "Issue reaction groups",
+        "status": "unsupported",
+        "reason": "Reaction aggregation is not part of the supported issue view slice."
+      },
+      {
+        "name": "state",
+        "summary": "Issue state",
+        "status": "supported"
+      },
+      {
+        "name": "stateReason",
+        "summary": "Issue state reason",
+        "status": "unsupported",
+        "reason": "Gitea issue state does not expose a compatible state reason."
+      },
+      {
+        "name": "title",
+        "summary": "Issue title",
+        "status": "supported"
+      },
+      {
+        "name": "updatedAt",
+        "summary": "Issue updated timestamp",
+        "status": "supported"
+      },
+      {
+        "name": "url",
+        "summary": "Issue web URL",
+        "status": "supported"
+      }
+    ],
     "prRead": [
       {
         "name": "number",
@@ -482,7 +594,7 @@
             "issueStructuredOutput"
           ],
           "outputProfiles": [
-            "issueRead"
+            "issueViewRead"
           ]
         },
         {

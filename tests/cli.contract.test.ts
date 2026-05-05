@@ -571,6 +571,169 @@ test("pr list reads repository pull requests from the selected Gitea host", asyn
 
 test("issue view supports manifest-backed json output fields", async () => {
   const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 900,
+            body: "Latest discussion",
+            created_at: "2026-05-05T07:00:00Z",
+            updated_at: "2026-05-05T07:30:00Z",
+            html_url: "http://127.0.0.1/issue-comments/900",
+            user: {
+              id: 13,
+              login: "reviewer",
+              full_name: "Reviewer One"
+            }
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.url !== "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        id: 4200,
+        number: 42,
+        title: "Ship the issue read slice",
+        state: "open",
+        body: "Issue body",
+        created_at: "2026-05-04T12:00:00Z",
+        updated_at: "2026-05-05T08:30:00Z",
+        closed_at: null,
+        comments: 1,
+        pin_order: 1,
+        user: {
+          id: 7,
+          login: "octocat",
+          full_name: "The Octocat"
+        },
+        assignees: [
+          {
+            id: 11,
+            login: "hubot",
+            full_name: "Hub O. T."
+          }
+        ],
+        labels: [
+          {
+            id: 100,
+            name: "feature",
+            description: "Feature work",
+            color: "00aabb"
+          }
+        ],
+        milestone: {
+          id: 9,
+          title: "Broad First",
+          description: "Ship the next slice",
+          state: "open",
+          created_at: "2026-05-03T10:00:00Z",
+          updated_at: "2026-05-04T10:30:00Z",
+          closed_at: null
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+  const issueUrl = `http://127.0.0.1:${port}/octo/project/issues/42`;
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "assignees,author,body,closed,closedAt,comments,createdAt,id,isPinned,labels,milestone,number,state,title,updatedAt,url"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      assignees: [
+        {
+          id: 11,
+          login: "hubot",
+          name: "Hub O. T."
+        }
+      ],
+      author: {
+        id: 7,
+        login: "octocat",
+        name: "The Octocat"
+      },
+      body: "Issue body",
+      closed: false,
+      closedAt: null,
+      comments: [
+        {
+          id: 900,
+          author: {
+            id: 13,
+            login: "reviewer",
+            name: "Reviewer One"
+          },
+          body: "Latest discussion",
+          createdAt: "2026-05-05T07:00:00Z",
+          updatedAt: "2026-05-05T07:30:00Z",
+          url: "http://127.0.0.1/issue-comments/900"
+        }
+      ],
+      createdAt: "2026-05-04T12:00:00Z",
+      id: 4200,
+      isPinned: true,
+      labels: [
+        {
+          id: 100,
+          name: "feature",
+          description: "Feature work",
+          color: "00aabb"
+        }
+      ],
+      milestone: {
+        id: 9,
+        title: "Broad First",
+        description: "Ship the next slice",
+        state: "open",
+        createdAt: "2026-05-03T10:00:00Z",
+        updatedAt: "2026-05-04T10:30:00Z",
+        closedAt: null
+      },
+      number: 42,
+      title: "Ship the issue read slice",
+      state: "open",
+      updatedAt: "2026-05-05T08:30:00Z",
+      url: issueUrl
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view rejects manifest-declared unsupported json output fields", async () => {
+  const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/issues/42") {
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({ message: "not found" }));
@@ -599,17 +762,12 @@ test("issue view supports manifest-backed json output fields", async () => {
       "-R",
       `127.0.0.1:${port}/octo/project`,
       "--json",
-      "number,title,state,url"
+      "number,projectCards"
     ]);
 
-    assert.equal(result.exitCode, 0);
-    assert.deepEqual(JSON.parse(result.stdout), {
-      number: 42,
-      title: "Ship the issue read slice",
-      state: "open",
-      url: `http://127.0.0.1:${port}/octo/project/issues/42`
-    });
-    assert.equal(result.stderr, "");
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "Unsupported JSON field(s): projectCards\n");
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => {
@@ -689,6 +847,29 @@ test("pr view supports manifest-backed json output fields", async () => {
 
 test("issue view supports jq filtering on json output", async () => {
   const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 900,
+            body: "Latest discussion",
+            user: {
+              login: "reviewer"
+            }
+          },
+          {
+            id: 901,
+            body: "Follow-up",
+            user: {
+              login: "maintainer"
+            }
+          }
+        ])
+      );
+      return;
+    }
+
     if (request.url !== "/api/v1/repos/octo/project/issues/42") {
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({ message: "not found" }));
@@ -700,7 +881,8 @@ test("issue view supports jq filtering on json output", async () => {
       JSON.stringify({
         number: 42,
         title: "Ship the issue read slice",
-        state: "open"
+        state: "open",
+        comments: 2
       })
     );
   });
@@ -717,13 +899,13 @@ test("issue view supports jq filtering on json output", async () => {
       "-R",
       `127.0.0.1:${port}/octo/project`,
       "--json",
-      "number,title,state,url",
+      "comments",
       "--jq",
-      ".number"
+      ".comments[].body"
     ]);
 
     assert.equal(result.exitCode, 0);
-    assert.equal(result.stdout, "42\n");
+    assert.equal(result.stdout, "\"Latest discussion\"\n\"Follow-up\"\n");
     assert.equal(result.stderr, "");
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -810,7 +992,11 @@ test("issue view supports template formatting on json output", async () => {
       JSON.stringify({
         number: 42,
         title: "Ship the issue read slice",
-        state: "open"
+        body: "Issue body",
+        state: "open",
+        user: {
+          login: "octocat"
+        }
       })
     );
   });
@@ -827,13 +1013,13 @@ test("issue view supports template formatting on json output", async () => {
       "-R",
       `127.0.0.1:${port}/octo/project`,
       "--json",
-      "number,title,state,url",
+      "author,body",
       "--template",
-      "{{.title}} (#{{.number}})"
+      "{{.author.login}}: {{.body}}"
     ]);
 
     assert.equal(result.exitCode, 0);
-    assert.equal(result.stdout, "Ship the issue read slice (#42)\n");
+    assert.equal(result.stdout, "octocat: Issue body\n");
     assert.equal(result.stderr, "");
   } finally {
     await new Promise<void>((resolve, reject) =>

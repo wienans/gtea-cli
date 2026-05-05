@@ -76,6 +76,8 @@ function parseJqStep(step: string): { tokens?: string[]; error?: string } {
 
     if (remainder.startsWith(".")) {
       remainder = remainder.slice(1);
+    } else if (remainder.startsWith("[]")) {
+      continue;
     } else if (remainder.length > 0) {
       return {
         error: `Unsupported jq expression: ${step}`
@@ -172,15 +174,30 @@ function stringifyTemplateValue(value: StructuredValue): string {
   return JSON.stringify(value);
 }
 
+function resolveTemplatePath(value: StructuredValue, path: string[]): StructuredValue {
+  let currentValue: StructuredValue = value;
+
+  for (const segment of path) {
+    if (currentValue === null || Array.isArray(currentValue) || typeof currentValue !== "object") {
+      return null;
+    }
+
+    currentValue = currentValue[segment] ?? null;
+  }
+
+  return currentValue;
+}
+
 function renderTemplateBlock(value: StructuredValue, template: string): { output?: string; error?: string } {
   let result = template.replace(/{{\s*"((?:[^"\\]|\\.)*)"\s*}}/g, (_match, literal: string) => JSON.parse(`"${literal}"`));
 
-  result = result.replace(/{{\s*\.([A-Za-z_][A-Za-z0-9_]*)\s*}}/g, (_match, fieldName: string) => {
-    if (value === null || Array.isArray(value) || typeof value !== "object") {
-      return "";
-    }
+  result = result.replace(
+    /{{\s*\.([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*}}/g,
+    (_match, fieldPath: string) => stringifyTemplateValue(resolveTemplatePath(value, fieldPath.split(".")))
+  );
 
-    return stringifyTemplateValue(value[fieldName] ?? null);
+  result = result.replace(/{{\s*\.\s*}}/g, () => {
+    return stringifyTemplateValue(value);
   });
 
   if (/{{[^}]+}}/.test(result)) {
@@ -195,13 +212,17 @@ function renderTemplateBlock(value: StructuredValue, template: string): { output
 export function renderStructuredTemplate(value: StructuredValue, template: string): { output?: string; error?: string } {
   let rangeError: string | undefined;
 
-  const withRangesExpanded = template.replace(/{{\s*range\s+\.\s*}}([\s\S]*?){{\s*end\s*}}/g, (_match, innerTemplate: string) => {
-    if (!Array.isArray(value)) {
+  const withRangesExpanded = template.replace(
+    /{{\s*range\s+(\.|\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*}}([\s\S]*?){{\s*end\s*}}/g,
+    (_match, rangePath: string, innerTemplate: string) => {
+    const rangeValue = rangePath === "." ? value : resolveTemplatePath(value, rangePath.slice(1).split("."));
+
+    if (!Array.isArray(rangeValue)) {
       rangeError = "Template range requires an array value.";
       return "";
     }
 
-    return value.map((entry) => {
+    return rangeValue.map((entry) => {
       const renderedEntry = renderTemplateBlock(entry, innerTemplate);
 
       if (renderedEntry.error !== undefined || renderedEntry.output === undefined) {

@@ -42,37 +42,93 @@ interface IssueRecord {
   title: string;
   state: string;
   url: string;
+  assignees: IssueUserRecord[];
+  labels: IssueLabelRecord[];
+  closed: boolean;
+  isPinned: boolean;
   body?: string;
+  id?: number;
+  author?: IssueUserRecord | null;
   authorLogin?: string;
   labelNames?: string[];
   commentCount?: number;
   comments?: IssueCommentRecord[];
+  milestone?: IssueMilestoneRecord | null;
+  createdAt?: string;
+  updatedAt?: string;
+  closedAt?: string;
 }
 
-interface IssueCommentRecord {
+interface IssueUserRecord extends StructuredObject {
+  id: number | null;
+  login: string | null;
+  name: string | null;
+}
+
+interface IssueLabelRecord extends StructuredObject {
+  id: number | null;
+  name: string | null;
+  description: string | null;
+  color: string | null;
+}
+
+interface IssueMilestoneRecord extends StructuredObject {
+  id: number | null;
+  title: string | null;
+  description: string | null;
+  state: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  closedAt: string | null;
+}
+
+interface IssueCommentRecord extends StructuredObject {
+  id: number | null;
+  author: IssueUserRecord | null;
   body: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  url: string | null;
   authorLogin?: string;
+}
+
+interface GiteaUserPayload {
+  id?: number;
+  login?: string;
+  full_name?: string;
 }
 
 interface GiteaLabelPayload {
   id?: number;
   name?: string;
+  description?: string;
+  color?: string;
 }
 
 interface GiteaMilestonePayload {
   id?: number;
   title?: string;
+  description?: string;
+  state?: string;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string | null;
 }
 
 interface GiteaIssuePayload {
+  id?: number;
   number?: number;
   title?: string;
   state?: string;
   body?: string;
   comments?: number;
-  assignee?: { login?: string };
-  assignees?: Array<{ login?: string }>;
-  user?: { login?: string };
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string | null;
+  pin_order?: number;
+  assignee?: GiteaUserPayload;
+  assignees?: GiteaUserPayload[];
+  user?: GiteaUserPayload;
   labels?: GiteaLabelPayload[];
   milestone?: GiteaMilestonePayload;
 }
@@ -80,7 +136,10 @@ interface GiteaIssuePayload {
 interface GiteaIssueCommentPayload {
   id?: number;
   body?: string;
-  user?: { login?: string };
+  created_at?: string;
+  updated_at?: string;
+  html_url?: string;
+  user?: GiteaUserPayload;
 }
 
 interface IssueUpdatePayload {
@@ -94,10 +153,23 @@ interface IssueUpdatePayload {
 const issueGroup = supportManifest.children.find(
   (node): node is ManifestGroup => node.kind === "group" && node.name === "issue"
 );
-const issueViewCommand = issueGroup?.children.find(
-  (node): node is ManifestCommand => node.kind === "command" && node.name === "view"
+const issueCommands = new Map(
+  (issueGroup?.children ?? [])
+    .filter((node): node is ManifestCommand => node.kind === "command")
+    .map((node) => [node.name, node] as const)
 );
-const issueOutputFields = new Set((issueViewCommand?.outputFields ?? []).map((field) => field.name));
+
+function collectSupportedIssueOutputFields(commandName: string): Set<string> {
+  return new Set(
+    (issueCommands.get(commandName)?.outputFields ?? [])
+      .filter((field) => field.status !== "unsupported")
+      .map((field) => field.name)
+  );
+}
+
+const issueListOutputFields = collectSupportedIssueOutputFields("list");
+const issueStatusOutputFields = collectSupportedIssueOutputFields("status");
+const issueViewOutputFields = collectSupportedIssueOutputFields("view");
 
 function renderUnsupportedIssueFlag(subcommand: string, flag: string, reason: string): CliResult {
   return {
@@ -752,26 +824,129 @@ function buildIssueUrl(repository: RepositoryContext, issueNumber: number): stri
   return `${buildHostBaseUrl(repository.hostname)}/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}`;
 }
 
+function mapIssueUserRecord(payload?: GiteaUserPayload): IssueUserRecord | null {
+  if (payload === undefined) {
+    return null;
+  }
+
+  const id = typeof payload.id === "number" ? payload.id : null;
+  const login = typeof payload.login === "string" ? payload.login : null;
+  const name = typeof payload.full_name === "string" ? payload.full_name : null;
+
+  if (id === null && login === null && name === null) {
+    return null;
+  }
+
+  return {
+    id,
+    login,
+    name
+  };
+}
+
+function mapIssueLabelRecord(payload: GiteaLabelPayload): IssueLabelRecord | null {
+  const id = typeof payload.id === "number" ? payload.id : null;
+  const name = typeof payload.name === "string" ? payload.name : null;
+  const description = typeof payload.description === "string" ? payload.description : null;
+  const color = typeof payload.color === "string" ? payload.color : null;
+
+  if (id === null && name === null && description === null && color === null) {
+    return null;
+  }
+
+  return {
+    id,
+    name,
+    description,
+    color
+  };
+}
+
+function mapIssueMilestoneRecord(payload?: GiteaMilestonePayload): IssueMilestoneRecord | null {
+  if (payload === undefined) {
+    return null;
+  }
+
+  return {
+    id: typeof payload.id === "number" ? payload.id : null,
+    title: typeof payload.title === "string" ? payload.title : null,
+    description: typeof payload.description === "string" ? payload.description : null,
+    state: typeof payload.state === "string" ? payload.state : null,
+    createdAt: typeof payload.created_at === "string" ? payload.created_at : null,
+    updatedAt: typeof payload.updated_at === "string" ? payload.updated_at : null,
+    closedAt: typeof payload.closed_at === "string" ? payload.closed_at : null
+  };
+}
+
+function mapIssueCommentRecord(
+  repository: RepositoryContext,
+  issueNumber: number,
+  payload: GiteaIssueCommentPayload
+): IssueCommentRecord {
+  const author = mapIssueUserRecord(payload.user);
+  const commentId = typeof payload.id === "number" ? payload.id : null;
+
+  return {
+    id: commentId,
+    author,
+    body: typeof payload.body === "string" ? payload.body : "",
+    createdAt: typeof payload.created_at === "string" ? payload.created_at : null,
+    updatedAt: typeof payload.updated_at === "string" ? payload.updated_at : null,
+    url: typeof payload.html_url === "string"
+      ? payload.html_url
+      : commentId === null
+        ? null
+        : `${buildIssueUrl(repository, issueNumber)}#issuecomment-${commentId}`
+  };
+}
+
 function mapIssueRecord(repository: RepositoryContext, payload: GiteaIssuePayload, fallbackNumber: number): IssueRecord {
   const number = typeof payload.number === "number" ? payload.number : fallbackNumber;
+  const id = typeof payload.id === "number" ? payload.id : undefined;
+  const state = typeof payload.state === "string" ? payload.state : "unknown";
   const body = typeof payload.body === "string" ? payload.body : undefined;
+  const author = mapIssueUserRecord(payload.user);
   const authorLogin = typeof payload.user?.login === "string" ? payload.user.login : undefined;
+  const assignees = Array.isArray(payload.assignees)
+    ? payload.assignees
+      .map((assignee) => mapIssueUserRecord(assignee))
+      .filter((assignee): assignee is IssueUserRecord => assignee !== null)
+    : [];
+  const labels = Array.isArray(payload.labels)
+    ? payload.labels
+      .map((label) => mapIssueLabelRecord(label))
+      .filter((label): label is IssueLabelRecord => label !== null)
+    : [];
   const labelNames = Array.isArray(payload.labels)
     ? payload.labels
       .map((label) => (typeof label.name === "string" ? label.name : undefined))
       .filter((label): label is string => label !== undefined && label.length > 0)
     : [];
   const commentCount = typeof payload.comments === "number" ? payload.comments : undefined;
+  const milestone = mapIssueMilestoneRecord(payload.milestone);
+  const createdAt = typeof payload.created_at === "string" ? payload.created_at : undefined;
+  const updatedAt = typeof payload.updated_at === "string" ? payload.updated_at : undefined;
+  const closedAt = typeof payload.closed_at === "string" ? payload.closed_at : undefined;
 
   return {
     number,
     title: typeof payload.title === "string" ? payload.title : `Issue #${number}`,
-    state: typeof payload.state === "string" ? payload.state : "unknown",
+    state,
     url: buildIssueUrl(repository, number),
+    assignees,
+    labels,
+    closed: state === "closed",
+    isPinned: typeof payload.pin_order === "number" && payload.pin_order > 0,
+    ...(id === undefined ? {} : { id }),
     ...(body === undefined ? {} : { body }),
+    ...(author === null ? {} : { author }),
     ...(authorLogin === undefined ? {} : { authorLogin }),
     ...(labelNames.length === 0 ? {} : { labelNames }),
-    ...(commentCount === undefined ? {} : { commentCount })
+    ...(commentCount === undefined ? {} : { commentCount }),
+    ...(milestone === null ? {} : { milestone }),
+    ...(createdAt === undefined ? {} : { createdAt }),
+    ...(updatedAt === undefined ? {} : { updatedAt }),
+    ...(closedAt === undefined ? {} : { closedAt })
   };
 }
 
@@ -902,15 +1077,7 @@ async function readIssueComments(
     }
 
     const payload = await response.json() as GiteaIssueCommentPayload[];
-    const comments = payload.map((comment) => {
-      const body = typeof comment.body === "string" ? comment.body : "";
-      const authorLogin = typeof comment.user?.login === "string" ? comment.user.login : undefined;
-
-      return {
-        body,
-        ...(authorLogin === undefined ? {} : { authorLogin })
-      };
-    });
+    const comments = payload.map((comment) => mapIssueCommentRecord(repository, issueNumber, comment));
 
     return { comments };
   } catch (error) {
@@ -1656,15 +1823,18 @@ function renderIssue(issue: IssueRecord, options?: { showAllComments?: boolean }
   if (issue.comments !== undefined && issue.comments.length > 0) {
     if (options?.showAllComments === true) {
       for (const comment of issue.comments) {
+        const commentAuthorLogin = comment.author?.login ?? comment.authorLogin ?? undefined;
+
         lines.push(
           "",
-          comment.authorLogin === undefined ? "Comment" : `${comment.authorLogin} • Comment`,
+          commentAuthorLogin === undefined ? "Comment" : `${commentAuthorLogin} • Comment`,
           "",
           comment.body
         );
       }
     } else {
       const newestComment = issue.comments[issue.comments.length - 1]!;
+      const newestCommentAuthorLogin = newestComment.author?.login ?? newestComment.authorLogin ?? undefined;
 
       const hiddenCommentCount = Math.max((issue.commentCount ?? issue.comments.length) - 1, 0);
 
@@ -1674,7 +1844,7 @@ function renderIssue(issue: IssueRecord, options?: { showAllComments?: boolean }
 
       lines.push(
         "",
-        newestComment.authorLogin === undefined ? "Newest comment" : `${newestComment.authorLogin} • Newest comment`,
+        newestCommentAuthorLogin === undefined ? "Newest comment" : `${newestCommentAuthorLogin} • Newest comment`,
         "",
         newestComment.body
       );
@@ -1724,10 +1894,11 @@ function renderIssueStatus(
 function renderStructuredIssueOutput(
   value: IssueRecord | IssueRecord[],
   jsonFields: string[],
+  supportedFields: Iterable<string>,
   jqExpression?: string,
   template?: string
 ): { stdout?: string; error?: CliResult } {
-  const renderedOutput = renderStructuredJson(value, jsonFields, issueOutputFields);
+  const renderedOutput = renderStructuredJson(value, jsonFields, supportedFields);
 
   if (renderedOutput.error !== undefined || renderedOutput.output === undefined) {
     return {
@@ -2188,6 +2359,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       const renderedOutput = renderStructuredIssueOutput(
         issueListResult.issues,
         parsedFlags.flags.jsonFields,
+        issueListOutputFields,
         parsedFlags.flags.jqExpression,
         parsedFlags.flags.template
       );
@@ -2261,6 +2433,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       const renderedOutput = renderStructuredIssueOutput(
         relevantIssues,
         parsedFlags.flags.jsonFields,
+        issueStatusOutputFields,
         parsedFlags.flags.jqExpression,
         parsedFlags.flags.template
       );
@@ -2308,9 +2481,34 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   }
 
   if (parsedFlags.flags.jsonFields !== undefined) {
+    if (parsedFlags.flags.jsonFields.includes("comments")) {
+      if (issueResult.issue.commentCount === 0) {
+        issueResult.issue = {
+          ...issueResult.issue,
+          comments: []
+        };
+      } else {
+        const commentResult = await readIssueComments(repositoryResult.repository, issueNumber, context);
+
+        if (commentResult.error !== undefined || commentResult.comments === undefined) {
+          return commentResult.error ?? {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Failed to read issue comments.\n"
+          };
+        }
+
+        issueResult.issue = {
+          ...issueResult.issue,
+          comments: commentResult.comments
+        };
+      }
+    }
+
     const renderedOutput = renderStructuredIssueOutput(
       issueResult.issue,
       parsedFlags.flags.jsonFields,
+      issueViewOutputFields,
       parsedFlags.flags.jqExpression,
       parsedFlags.flags.template
     );
