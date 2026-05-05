@@ -32,6 +32,335 @@ test("root help shows the broad-first command groups", async () => {
   assert.match(result.stdout, /\brepo\b/);
 });
 
+test("repo view help classifies repository targeting and structured output flags", async () => {
+  const result = await executeCli(["repo", "view", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--repo, -R[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--json[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--jq[\s\S]*\[emulated\]/i);
+  assert.match(result.stdout, /--template[\s\S]*\[emulated\]/i);
+});
+
+test("repo view reads a single repository from the selected Gitea host", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        name: "project",
+        full_name: "octo/project",
+        private: false,
+        html_url: `http://127.0.0.1:${getServerPort(server)}/octo/project`,
+        owner: {
+          login: "octo"
+        },
+        description: "Repository read slice"
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["repo", "view", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /octo\/project/);
+    assert.match(result.stdout, /public/i);
+    assert.match(result.stdout, new RegExp(`http://127\\.0\\.0\\.1:${port}/octo/project`));
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("repo view requires --json when --jq is provided", async () => {
+  const result = await executeCli([
+    "repo",
+    "view",
+    "-R",
+    "https://example.com/octo/project",
+    "--jq",
+    ".name"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "--jq requires --json.\n");
+});
+
+test("repo list rejects --template without --json and disallows combining it with --jq", async () => {
+  const missingJsonResult = await executeCli([
+    "repo",
+    "list",
+    "-R",
+    "https://example.com/octo/project",
+    "--template",
+    "{{.name}}"
+  ]);
+
+  assert.equal(missingJsonResult.exitCode, 1);
+  assert.equal(missingJsonResult.stdout, "");
+  assert.equal(missingJsonResult.stderr, "--template requires --json.\n");
+
+  const conflictingFlagsResult = await executeCli([
+    "repo",
+    "list",
+    "-R",
+    "https://example.com/octo/project",
+    "--json",
+    "name",
+    "--jq",
+    ".[].name",
+    "--template",
+    "{{.name}}"
+  ]);
+
+  assert.equal(conflictingFlagsResult.exitCode, 1);
+  assert.equal(conflictingFlagsResult.stdout, "");
+  assert.equal(conflictingFlagsResult.stderr, "Choose at most one of --jq and --template.\n");
+});
+
+test("repo list reads repositories for the selected owner on the selected Gitea host", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/users/octo/repos") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          name: "project",
+          private: false,
+          html_url: `http://127.0.0.1:${port}/octo/project`,
+          owner: {
+            login: "octo"
+          }
+        },
+        {
+          name: "private-project",
+          private: true,
+          html_url: `http://127.0.0.1:${port}/octo/private-project`,
+          owner: {
+            login: "octo"
+          }
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["repo", "list", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /octo\/project \[public\]/);
+    assert.match(result.stdout, /octo\/private-project \[private\]/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("repo list supports manifest-backed json output fields", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/users/octo/repos") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          name: "project",
+          private: false,
+          html_url: `http://127.0.0.1:${port}/octo/project`,
+          owner: {
+            login: "octo"
+          }
+        },
+        {
+          name: "private-project",
+          private: true,
+          html_url: `http://127.0.0.1:${port}/octo/private-project`,
+          owner: {
+            login: "octo"
+          }
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "repo",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "name,visibility,url",
+      "--jq",
+      ".[].name"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "\"project\"\n\"private-project\"\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("repo clone uses the Git Toolchain to clone the selected repository", async () => {
+  let port = 0;
+  const remoteRoot = mkdtempSync(join(tmpdir(), "gtea-repo-clone-remote-"));
+  const sourceRoot = mkdtempSync(join(tmpdir(), "gtea-repo-clone-source-"));
+  const cloneParent = mkdtempSync(join(tmpdir(), "gtea-repo-clone-parent-"));
+  const cloneRoot = join(cloneParent, "project-checkout");
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        name: "project",
+        private: false,
+        html_url: `http://127.0.0.1:${port}/octo/project`,
+        clone_url: remoteRoot,
+        owner: {
+          login: "octo"
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    assert.equal(spawnSync("git", ["init", "--bare", remoteRoot], {
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["init", "--initial-branch=main"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["config", "user.email", "clone@example.com"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["config", "user.name", "Clone Test"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+
+    writeFileSync(join(sourceRoot, "README.md"), "repo read slice\n", "utf8");
+
+    assert.equal(spawnSync("git", ["add", "README.md"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["commit", "-m", "seed repository"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["remote", "add", "origin", remoteRoot], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["push", "-u", "origin", "main"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["--git-dir", remoteRoot, "symbolic-ref", "HEAD", "refs/heads/main"], {
+      encoding: "utf8"
+    }).status, 0);
+
+    const result = await executeCli([
+      "repo",
+      "clone",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      cloneRoot
+    ], {
+      cwd: cloneParent
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Cloned octo\/project/i);
+    assert.equal(readFileSync(join(cloneRoot, "README.md"), "utf8").replace(/\r\n/g, "\n"), "repo read slice\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(remoteRoot, { force: true, recursive: true });
+    rmSync(sourceRoot, { force: true, recursive: true });
+    rmSync(cloneParent, { force: true, recursive: true });
+  }
+});
+
 test("issue list requires a Repository Context when no repo is provided", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "gtea-issue-context-"));
 

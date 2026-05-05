@@ -34,11 +34,46 @@
         "status": "supported"
       }
     ],
+    "repoRepositoryTarget": [
+      {
+        "name": "--repo",
+        "aliases": [
+          "-R"
+        ],
+        "summary": "Select the Repository Context explicitly",
+        "status": "supported"
+      }
+    ],
     "structuredOutput": [
       {
         "name": "--json",
         "summary": "Format output as JSON",
         "status": "unsupported"
+      },
+      {
+        "name": "--jq",
+        "summary": "Filter JSON output with jq syntax",
+        "status": "emulated",
+        "reason": "Implements the repository read slice's supported jq field-path subset.",
+        "requires": [
+          "--json"
+        ]
+      },
+      {
+        "name": "--template",
+        "summary": "Format JSON output with a Go template",
+        "status": "emulated",
+        "reason": "Implements the repository read slice's supported field-interpolation template subset.",
+        "requires": [
+          "--json"
+        ]
+      }
+    ],
+    "repoStructuredOutput": [
+      {
+        "name": "--json",
+        "summary": "Format output as JSON",
+        "status": "supported"
       },
       {
         "name": "--jq",
@@ -729,22 +764,22 @@
       {
         "name": "name",
         "summary": "Repository name",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "owner",
         "summary": "Repository owner",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "visibility",
         "summary": "Repository visibility",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "url",
         "summary": "Repository web URL",
-        "status": "unsupported"
+        "status": "supported"
       }
     ]
   },
@@ -1147,11 +1182,10 @@
           "kind": "command",
           "name": "view",
           "summary": "View a repository",
-          "status": "unsupported",
-          "reason": "Pending the repository read slice (#10).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget",
-            "structuredOutput"
+            "repoRepositoryTarget",
+            "repoStructuredOutput"
           ],
           "outputProfiles": [
             "repoRead"
@@ -1161,11 +1195,10 @@
           "kind": "command",
           "name": "list",
           "summary": "List repositories",
-          "status": "unsupported",
-          "reason": "Pending the repository read slice (#10).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget",
-            "structuredOutput"
+            "repoRepositoryTarget",
+            "repoStructuredOutput"
           ],
           "outputProfiles": [
             "repoRead"
@@ -1175,8 +1208,10 @@
           "kind": "command",
           "name": "clone",
           "summary": "Clone a repository",
-          "status": "unsupported",
-          "reason": "Pending the repository read slice (#10)."
+          "status": "supported",
+          "flagProfiles": [
+            "repoRepositoryTarget"
+          ]
         },
         {
           "kind": "command",
