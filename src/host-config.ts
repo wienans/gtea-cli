@@ -15,6 +15,7 @@ export interface NativeAuthConfig {
 }
 
 const explicitSchemePattern = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//;
+const supportedHostProtocols = new Set(["http:", "https:"]);
 
 function resolveConfigDirectory(context: ResolvedCliExecutionContext): string {
   const env = context.env;
@@ -81,6 +82,10 @@ export function parseHostname(rawValue: string | undefined): string | undefined 
     const normalizedUrl = new URL(
       hasExplicitScheme ? trimmedValue : `https://${trimmedValue}`
     );
+
+    if (hasExplicitScheme && !supportedHostProtocols.has(normalizedUrl.protocol)) {
+      return undefined;
+    }
 
     if (normalizedUrl.pathname !== "/" && normalizedUrl.pathname !== "") {
       return undefined;

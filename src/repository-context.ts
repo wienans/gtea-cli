@@ -108,8 +108,11 @@ function parseGitRemote(rawRemote: string): RepositoryContext | undefined {
     try {
       const remoteUrl = new URL(rawRemote);
       const authority = remoteUrl.port.length > 0 ? `${remoteUrl.hostname}:${remoteUrl.port}` : remoteUrl.hostname;
+      const remoteHost = remoteUrl.protocol === "http:" || remoteUrl.protocol === "https:"
+        ? `${remoteUrl.protocol}//${authority}`
+        : authority;
 
-      return parseRemotePath(`${remoteUrl.protocol}//${authority}`, remoteUrl.pathname);
+      return parseRemotePath(remoteHost, remoteUrl.pathname);
     } catch {
       return undefined;
     }

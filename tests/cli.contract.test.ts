@@ -2302,6 +2302,34 @@ test("browse preserves an explicit http git remote when inferring the repository
   }
 });
 
+test("browse defaults an ssh url git remote to https when inferring the repository", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "gtea-browse-ssh-remote-"));
+
+  try {
+    const initResult = spawnSync("git", ["init", "--initial-branch=trunk"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(initResult.status, 0, initResult.stderr);
+
+    const remoteResult = spawnSync("git", ["remote", "add", "origin", "ssh://git@gitea.example.com/octo/project.git"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(remoteResult.status, 0, remoteResult.stderr);
+
+    const result = await executeCli(["browse", "--no-browser"], { cwd: repoRoot });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "https://gitea.example.com/octo/project\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(repoRoot, { force: true, recursive: true });
+  }
+});
+
 test("pr checkout uses the Git Toolchain to fetch and switch to the pull request head", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/pulls/42") {
