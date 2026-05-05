@@ -2232,8 +2232,16 @@ function renderIssue(issue: IssueRecord, options?: { showAllComments?: boolean }
   return `${lines.join("\n")}\n`;
 }
 
-function renderIssueList(issues: IssueRecord[]): string {
+function renderIssueList(issues: IssueRecord[], options?: { state?: IssueListState }): string {
   if (issues.length === 0) {
+    if (options?.state === "closed") {
+      return "No closed issues found.\n";
+    }
+
+    if (options?.state === "all") {
+      return "No issues found.\n";
+    }
+
     return "No open issues found.\n";
   }
 
@@ -2786,7 +2794,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
     return {
       exitCode: 0,
-      stdout: renderIssueList(issueListResult.issues),
+      stdout: renderIssueList(issueListResult.issues, { state: queryOptionsResult.options.state }),
       stderr: ""
     };
   }

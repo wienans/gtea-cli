@@ -646,6 +646,49 @@ test("issue list supports state filtering with manifest-backed json output field
   }
 });
 
+test("issue list reports an empty filtered result using the requested state", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=closed") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify([]));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--state",
+      "closed"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "No closed issues found.\n");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("issue list translates supported filters into the Gitea repository issue query", async () => {
   const server = createServer((request, response) => {
     if (
