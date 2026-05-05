@@ -13,7 +13,7 @@ A `gtea` command that preserves the `gh` command path and flags so existing scri
 _Avoid_: equivalent command, close enough
 
 **Gitea Host**:
-A specific Gitea server that `gtea` can authenticate against and route commands to.
+A specific Gitea server plus its explicit URL scheme when one is provided; bare hostnames default to HTTPS.
 _Avoid_: backend, instance, remote service
 
 **Repository Context**:
@@ -73,7 +73,7 @@ A target host that `gtea` is allowed to operate against because it is a Gitea se
 _Avoid_: arbitrary forge, any Git host
 
 **Web Route Synthesis**:
-Building Gitea web URLs locally from repository and host context instead of relying on API-provided links.
+Building Gitea web URLs locally from repository and host context instead of relying on API-provided links, preserving an explicit host scheme when one was chosen.
 _Avoid_: API link lookup, remote URL guessing
 
 **Broad-First Milestone**:
@@ -104,6 +104,7 @@ _Avoid_: unit tests only, informal manual checks
 - Without a **Semantic Match**, the command becomes an **Explicit Unsupported Command**.
 - A **Support Manifest** records the **Compatibility Matrix** in a form that help, docs, and tests can consume.
 - **Compatibility Variables** can select a **Gitea Host**, supply a **Host Credential**, or override a **Repository Context**.
+- Bare hostnames resolve to HTTPS unless an explicit scheme is part of the **Gitea Host**.
 - The **Native Config Store** persists defaults and **Host Credentials** without sharing state with `gh`.
 - **Compatibility Variables** override the **Native Config Store** when both are present.
 - The **Exit Contract** applies to supported **Script-Compatible Commands** alongside syntax and output compatibility.
@@ -111,7 +112,7 @@ _Avoid_: unit tests only, informal manual checks
 - The **Support Manifest** is scoped to a declared **Support Baseline**.
 - Features above the **Support Baseline** are gated rather than assumed.
 - Every targeted **Repository Context** must belong to an **Eligible Host**.
-- **Web Route Synthesis** derives browser targets from an **Eligible Host** and a **Repository Context**.
+- **Web Route Synthesis** derives browser targets from an **Eligible Host** and a **Repository Context**, preserving an explicit host scheme.
 - A **Broad-First Milestone** proves the cross-cutting pieces of the **Compatibility Matrix** before deep write coverage.
 - A **Fine-Grained Support Manifest** classifies command paths, flags, and output fields separately.
 - A **Compatibility Harness** verifies the **Fine-Grained Support Manifest** against real `gh` surfaces and a disposable Gitea backend.
@@ -138,6 +139,7 @@ _Avoid_: unit tests only, informal manual checks
 - Interactive auth should not default to plain files when safer platform storage exists; resolved: `gtea` prefers a **Secure Credential Store** when available.
 - Public API docs may track newer development builds than the guaranteed floor; resolved: the first **Support Baseline** is `1.25.x`.
 - `gtea` is not a generic forge client; resolved: commands only operate on an **Eligible Host** and fail clearly on GitHub targets.
+- Host transport was ambiguous between a fixed HTTPS assumption and a user choice; resolved: bare hostnames still default to HTTPS, but an explicit scheme becomes part of the **Gitea Host** identity and is preserved across auth, repository resolution, API calls, web routes, and Git credential setup.
 - Browser-facing commands should not depend on spotty API links; resolved: `gtea` uses **Web Route Synthesis** for `browse` and `--web` paths.
 - The first release should prove breadth before depth; resolved: the initial delivery is a **Broad-First Milestone**.
 - Command-level support alone is too vague for script compatibility; resolved: the project uses a **Fine-Grained Support Manifest**.
