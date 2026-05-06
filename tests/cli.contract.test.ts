@@ -42,6 +42,28 @@ test("repo view help classifies repository targeting and structured output flags
   assert.match(result.stdout, /--template[\s\S]*\[emulated\]/i);
 });
 
+test("repo admin help classifies supported, emulated, and unsupported flags", async () => {
+  const createHelp = await executeCli(["repo", "create", "--help"]);
+  const forkHelp = await executeCli(["repo", "fork", "--help"]);
+  const renameHelp = await executeCli(["repo", "rename", "--help"]);
+
+  assert.equal(createHelp.exitCode, 0);
+  assert.match(createHelp.stdout, /--clone, -c[\s\S]*\[emulated\]/i);
+  assert.match(createHelp.stdout, /--description, -d[\s\S]*\[supported\]/i);
+  assert.match(createHelp.stdout, /--private[\s\S]*\[supported\]/i);
+  assert.match(createHelp.stdout, /--template, -p[\s\S]*\[unsupported\]/i);
+
+  assert.equal(forkHelp.exitCode, 0);
+  assert.match(forkHelp.stdout, /--clone[\s\S]*\[emulated\]/i);
+  assert.match(forkHelp.stdout, /--fork-name[\s\S]*\[supported\]/i);
+  assert.match(forkHelp.stdout, /--org[\s\S]*\[supported\]/i);
+  assert.match(forkHelp.stdout, /--remote[\s\S]*\[unsupported\]/i);
+
+  assert.equal(renameHelp.exitCode, 0);
+  assert.match(renameHelp.stdout, /--repo, -R[\s\S]*\[supported\]/i);
+  assert.match(renameHelp.stdout, /--yes, -y[\s\S]*\[emulated\]/i);
+});
+
 test("repo view reads a single repository from the selected Gitea host", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project") {
@@ -358,6 +380,372 @@ test("repo clone uses the Git Toolchain to clone the selected repository", async
     rmSync(remoteRoot, { force: true, recursive: true });
     rmSync(sourceRoot, { force: true, recursive: true });
     rmSync(cloneParent, { force: true, recursive: true });
+  }
+});
+
+test("repo create creates a private repository for the authenticated user", async () => {
+  let sawUserLookup = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token repo-create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/user") {
+      sawUserLookup = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ login: "octo" }));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/v1/user/repos") {
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      assert.deepEqual(JSON.parse(requestBody), {
+        name: "project-admin",
+        private: true,
+        description: "Repository admin slice"
+      });
+
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        name: "project-admin",
+        private: true,
+        description: "Repository admin slice",
+        html_url: `http://127.0.0.1:${getServerPort(server)}/octo/project-admin`,
+        owner: {
+          login: "octo"
+        }
+      }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "repo",
+      "create",
+      "project-admin",
+      "--private",
+      "--description",
+      "Repository admin slice"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "repo-create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project-admin\n`);
+    assert.equal(result.stderr, "");
+    assert.equal(sawUserLookup, true);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("repo create uses the Git Toolchain when --clone is requested", async () => {
+  const remoteRoot = mkdtempSync(join(tmpdir(), "gtea-repo-create-remote-"));
+  const sourceRoot = mkdtempSync(join(tmpdir(), "gtea-repo-create-source-"));
+  const cloneParent = mkdtempSync(join(tmpdir(), "gtea-repo-create-clone-parent-"));
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token repo-create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/user") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ login: "octo" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/user/repos") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      name: "project-clone",
+      private: false,
+      clone_url: remoteRoot,
+      html_url: `http://127.0.0.1:${getServerPort(server)}/octo/project-clone`,
+      owner: {
+        login: "octo"
+      }
+    }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    assert.equal(spawnSync("git", ["init", "--bare", remoteRoot], {
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["init", "--initial-branch=main"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["config", "user.email", "clone@example.com"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["config", "user.name", "Clone Test"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+
+    writeFileSync(join(sourceRoot, "README.md"), "repo create clone slice\n", "utf8");
+
+    assert.equal(spawnSync("git", ["add", "README.md"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["commit", "-m", "seed repository"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["remote", "add", "origin", remoteRoot], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["push", "-u", "origin", "main"], {
+      cwd: sourceRoot,
+      encoding: "utf8"
+    }).status, 0);
+    assert.equal(spawnSync("git", ["--git-dir", remoteRoot, "symbolic-ref", "HEAD", "refs/heads/main"], {
+      encoding: "utf8"
+    }).status, 0);
+
+    const port = getServerPort(server);
+    const result = await executeCli([
+      "repo",
+      "create",
+      "project-clone",
+      "--public",
+      "--clone"
+    ], {
+      cwd: cloneParent,
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "repo-create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project-clone\n`);
+    assert.equal(result.stderr, "");
+    assert.equal(
+      readFileSync(join(cloneParent, "project-clone", "README.md"), "utf8").replace(/\r\n/g, "\n"),
+      "repo create clone slice\n"
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(remoteRoot, { force: true, recursive: true });
+    rmSync(sourceRoot, { force: true, recursive: true });
+    rmSync(cloneParent, { force: true, recursive: true });
+  }
+});
+
+test("repo create rejects unsupported template-based creation flags explicitly", async () => {
+  const result = await executeCli([
+    "repo",
+    "create",
+    "project-admin",
+    "--public",
+    "--template",
+    "starter"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /repo create flag --template is currently unsupported/i);
+});
+
+test("repo rename renames the selected repository", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token repo-rename-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "PATCH" || request.url !== "/api/v1/repos/octo/project") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      name: "project-renamed"
+    });
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      name: "project-renamed",
+      private: false,
+      html_url: `http://127.0.0.1:${getServerPort(server)}/octo/project-renamed`,
+      owner: {
+        login: "octo"
+      }
+    }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "repo",
+      "rename",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "project-renamed",
+      "--yes"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "repo-rename-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project-renamed\n`);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("repo fork creates a fork for the authenticated user", async () => {
+  let sawUserLookup = false;
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token repo-fork-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/user") {
+      sawUserLookup = true;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ login: "builder" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/forks") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      name: "project-fork"
+    });
+
+    response.writeHead(202, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      name: "project-fork",
+      private: false,
+      html_url: `http://127.0.0.1:${getServerPort(server)}/builder/project-fork`,
+      owner: {
+        login: "builder"
+      }
+    }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "repo",
+      "fork",
+      "octo/project",
+      "--fork-name",
+      "project-fork"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "repo-fork-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/builder/project-fork\n`);
+    assert.equal(result.stderr, "");
+    assert.equal(sawUserLookup, true);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
   }
 });
 
