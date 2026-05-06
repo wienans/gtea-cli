@@ -3,6 +3,7 @@ import { executeBrowseCommand } from "./browse.js";
 import { CliExecutionContext, CliResult, resolveCliExecutionContext } from "./cli-runtime.js";
 import { executeIssueCommand } from "./issue.js";
 import { executePrCommand } from "./pr.js";
+import { executeReleaseCommand } from "./release.js";
 import { executeRepoCommand } from "./repo.js";
 import { ManifestCommand, ManifestGroup, ManifestNode, supportManifest } from "./support-manifest.js";
 
@@ -195,6 +196,12 @@ export async function executeCli(args: string[], context: CliExecutionContext = 
 
     if (prResult !== undefined) {
       return prResult;
+    }
+
+    const releaseResult = await executeReleaseCommand(args, executionContext);
+
+    if (releaseResult !== undefined) {
+      return releaseResult;
     }
 
     const repoResult = await executeRepoCommand(args, executionContext);
