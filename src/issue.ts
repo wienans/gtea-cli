@@ -87,7 +87,7 @@ interface IssueRecord {
   authorLogin?: string;
   labelNames?: string[];
   commentCount?: number;
-  comments?: number | IssueCommentRecord[];
+  comments?: IssueCommentRecord[];
   milestone?: IssueMilestoneRecord | null;
   createdAt?: string;
   updatedAt?: string;
@@ -1385,7 +1385,7 @@ function mapIssueRecord(repository: RepositoryContext, payload: GiteaIssuePayloa
     ...(author === null ? {} : { author }),
     ...(authorLogin === undefined ? {} : { authorLogin }),
     ...(labelNames.length === 0 ? {} : { labelNames }),
-    ...(commentCount === undefined ? {} : { commentCount, comments: commentCount }),
+    ...(commentCount === undefined ? {} : { commentCount }),
     ...(milestone === null ? {} : { milestone }),
     ...(createdAt === undefined ? {} : { createdAt }),
     ...(updatedAt === undefined ? {} : { updatedAt }),
@@ -1705,6 +1705,48 @@ async function readIssueComments(
       }
     };
   }
+}
+
+async function hydrateIssueRecordComments(
+  repository: RepositoryContext,
+  issues: IssueRecord[],
+  context: ResolvedCliExecutionContext
+): Promise<{ issues?: IssueRecord[]; error?: CliResult }> {
+  const hydratedIssues: IssueRecord[] = [];
+
+  for (const issue of issues) {
+    if (issue.commentCount === undefined) {
+      hydratedIssues.push(issue);
+      continue;
+    }
+
+    if (issue.commentCount === 0) {
+      hydratedIssues.push({
+        ...issue,
+        comments: []
+      });
+      continue;
+    }
+
+    const commentResult = await readIssueComments(repository, issue.number, context);
+
+    if (commentResult.error !== undefined || commentResult.comments === undefined) {
+      return {
+        error: commentResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Failed to read issue comments for #${issue.number}.\n`
+        }
+      };
+    }
+
+    hydratedIssues.push({
+      ...issue,
+      comments: commentResult.comments
+    });
+  }
+
+  return { issues: hydratedIssues };
 }
 
 async function readIssueEditLookupPayload<T>(
@@ -3096,8 +3138,28 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     }
 
     if (parsedFlags.flags.jsonFields !== undefined) {
+      let structuredIssues = issueListResult.issues;
+
+      if (parsedFlags.flags.jsonFields.includes("comments")) {
+        const hydratedCommentResult = await hydrateIssueRecordComments(
+          repositoryResult.repository,
+          structuredIssues,
+          context
+        );
+
+        if (hydratedCommentResult.error !== undefined || hydratedCommentResult.issues === undefined) {
+          return hydratedCommentResult.error ?? {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Failed to read issue comments.\n"
+          };
+        }
+
+        structuredIssues = hydratedCommentResult.issues;
+      }
+
       const renderedOutput = renderStructuredIssueOutput(
-        issueListResult.issues,
+        structuredIssues,
         parsedFlags.flags.jsonFields,
         issueListOutputFields,
         parsedFlags.flags.jqExpression,
@@ -3221,32 +3283,32 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   }
 
   if (parsedFlags.flags.jsonFields !== undefined) {
+    let structuredIssue = issueResult.issue;
+
     if (parsedFlags.flags.jsonFields.includes("comments")) {
-      if (issueResult.issue.commentCount === 0) {
-        issueResult.issue = {
-          ...issueResult.issue,
-          comments: []
-        };
-      } else {
-        const commentResult = await readIssueComments(repositoryResult.repository, issueNumber, context);
+      const hydratedCommentResult = await hydrateIssueRecordComments(
+        repositoryResult.repository,
+        [structuredIssue],
+        context
+      );
 
-        if (commentResult.error !== undefined || commentResult.comments === undefined) {
-          return commentResult.error ?? {
-            exitCode: 1,
-            stdout: "",
-            stderr: "Failed to read issue comments.\n"
-          };
-        }
-
-        issueResult.issue = {
-          ...issueResult.issue,
-          comments: commentResult.comments
+      if (hydratedCommentResult.error !== undefined || hydratedCommentResult.issues === undefined) {
+        return hydratedCommentResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: "Failed to read issue comments.\n"
         };
+      }
+
+      const hydratedIssue = hydratedCommentResult.issues[0];
+
+      if (hydratedIssue !== undefined) {
+        structuredIssue = hydratedIssue;
       }
     }
 
     const renderedOutput = renderStructuredIssueOutput(
-      issueResult.issue,
+      structuredIssue,
       parsedFlags.flags.jsonFields,
       issueViewOutputFields,
       parsedFlags.flags.jqExpression,

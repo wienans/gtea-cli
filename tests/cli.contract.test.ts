@@ -1920,6 +1920,27 @@ test("issue list accepts an explicit http host-qualified -R target", async () =>
 
 test("issue list supports state filtering with manifest-backed json output fields", async () => {
   const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 900,
+            body: "Latest discussion",
+            created_at: "2026-05-05T07:00:00Z",
+            updated_at: "2026-05-05T07:30:00Z",
+            html_url: "http://127.0.0.1/issue-comments/900",
+            user: {
+              id: 13,
+              login: "reviewer",
+              full_name: "Reviewer One"
+            }
+          }
+        ])
+      );
+      return;
+    }
+
     if (request.url !== "/api/v1/repos/octo/project/issues?state=all") {
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({ message: "not found" }));
@@ -2009,7 +2030,20 @@ test("issue list supports state filtering with manifest-backed json output field
         body: "List issue body",
         closed: true,
         closedAt: "2026-05-05T09:00:00Z",
-        comments: 2,
+        comments: [
+          {
+            id: 900,
+            author: {
+              id: 13,
+              login: "reviewer",
+              name: "Reviewer One"
+            },
+            body: "Latest discussion",
+            createdAt: "2026-05-05T07:00:00Z",
+            updatedAt: "2026-05-05T07:30:00Z",
+            url: "http://127.0.0.1/issue-comments/900"
+          }
+        ],
         createdAt: "2026-05-04T12:00:00Z",
         id: 4200,
         isPinned: true,
@@ -2035,6 +2069,63 @@ test("issue list supports state filtering with manifest-backed json output field
         title: "Ship the issue list slice",
         updatedAt: "2026-05-05T08:30:00Z",
         url: issueUrl
+      }
+    ]);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue list renders empty comment arrays for issues without comments in json output", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=open") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          number: 42,
+          title: "Ship the issue list slice",
+          state: "open",
+          comments: 0
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "comments,number"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      {
+        comments: [],
+        number: 42
       }
     ]);
     assert.equal(result.stderr, "");

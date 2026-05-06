@@ -1281,7 +1281,7 @@
       },
       {
         "name": "comments",
-        "summary": "Issue comment count",
+        "summary": "Issue comments",
         "status": "supported"
       },
       {
