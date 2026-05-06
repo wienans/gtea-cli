@@ -11,7 +11,7 @@
           "-R"
         ],
         "summary": "Select the Repository Context explicitly",
-        "status": "unsupported"
+        "status": "supported"
       }
     ],
     "issueRepositoryTarget": [
@@ -48,13 +48,13 @@
       {
         "name": "--json",
         "summary": "Format output as JSON",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "--jq",
         "summary": "Filter JSON output with jq syntax",
         "status": "emulated",
-        "reason": "Implements the repository read slice's supported jq field-path subset.",
+        "reason": "Implements the release read slice's supported jq field-path subset.",
         "requires": [
           "--json"
         ]
@@ -63,7 +63,7 @@
         "name": "--template",
         "summary": "Format JSON output with a Go template",
         "status": "emulated",
-        "reason": "Implements the repository read slice's supported field-interpolation template subset.",
+        "reason": "Implements the release read slice's supported field-interpolation template subset.",
         "requires": [
           "--json"
         ]
@@ -271,6 +271,236 @@
         "summary": "Specify the name for the fork remote",
         "status": "unsupported",
         "reason": "Git remote rewriting is not part of the supported repository administration slice."
+      }
+    ],
+    "releaseCreateOptions": [
+      {
+        "name": "--draft",
+        "aliases": [
+          "-d"
+        ],
+        "summary": "Save the release as a draft instead of publishing it",
+        "status": "supported"
+      },
+      {
+        "name": "--notes",
+        "aliases": [
+          "-n"
+        ],
+        "summary": "Release notes",
+        "status": "supported"
+      },
+      {
+        "name": "--notes-file",
+        "aliases": [
+          "-F"
+        ],
+        "summary": "Read release notes from a file or standard input",
+        "status": "supported"
+      },
+      {
+        "name": "--prerelease",
+        "aliases": [
+          "-p"
+        ],
+        "summary": "Mark the release as a prerelease",
+        "status": "supported"
+      },
+      {
+        "name": "--target",
+        "summary": "Target branch or full commit SHA",
+        "status": "supported"
+      },
+      {
+        "name": "--title",
+        "aliases": [
+          "-t"
+        ],
+        "summary": "Release title",
+        "status": "supported"
+      }
+    ],
+    "releaseCreateUnsupportedOptions": [
+      {
+        "name": "--discussion-category",
+        "summary": "Start a discussion in the specified category",
+        "status": "unsupported",
+        "reason": "Discussion creation is not part of the supported release create slice."
+      },
+      {
+        "name": "--fail-on-no-commits",
+        "summary": "Fail if there are no commits since the last release",
+        "status": "unsupported",
+        "reason": "Commit-gap validation is not part of the supported release create slice."
+      },
+      {
+        "name": "--generate-notes",
+        "summary": "Automatically generate title and notes",
+        "status": "unsupported",
+        "reason": "Automatic release note generation is not part of the supported release create slice."
+      },
+      {
+        "name": "--latest",
+        "summary": "Mark this release as latest",
+        "status": "unsupported",
+        "reason": "Explicit latest-release promotion is not part of the supported release create slice."
+      },
+      {
+        "name": "--notes-from-tag",
+        "summary": "Fetch notes from the tag annotation or message",
+        "status": "unsupported",
+        "reason": "Tag-annotation note generation is not part of the supported release create slice."
+      },
+      {
+        "name": "--notes-start-tag",
+        "summary": "Tag to use as the starting point for generated notes",
+        "status": "unsupported",
+        "reason": "Generated release note range selection is not part of the supported release create slice."
+      },
+      {
+        "name": "--verify-tag",
+        "summary": "Abort if the tag does not already exist remotely",
+        "status": "unsupported",
+        "reason": "Remote tag verification is not part of the supported release create slice."
+      }
+    ],
+    "releaseEditOptions": [
+      {
+        "name": "--draft",
+        "summary": "Save the release as a draft instead of publishing it",
+        "status": "supported"
+      },
+      {
+        "name": "--notes",
+        "aliases": [
+          "-n"
+        ],
+        "summary": "Release notes",
+        "status": "supported"
+      },
+      {
+        "name": "--notes-file",
+        "aliases": [
+          "-F"
+        ],
+        "summary": "Read release notes from a file or standard input",
+        "status": "supported"
+      },
+      {
+        "name": "--prerelease",
+        "summary": "Mark the release as a prerelease",
+        "status": "supported"
+      },
+      {
+        "name": "--tag",
+        "summary": "Rename the release tag",
+        "status": "supported"
+      },
+      {
+        "name": "--target",
+        "summary": "Target branch or full commit SHA",
+        "status": "supported"
+      },
+      {
+        "name": "--title",
+        "aliases": [
+          "-t"
+        ],
+        "summary": "Release title",
+        "status": "supported"
+      }
+    ],
+    "releaseEditUnsupportedOptions": [
+      {
+        "name": "--discussion-category",
+        "summary": "Start a discussion when publishing a draft",
+        "status": "unsupported",
+        "reason": "Discussion creation while publishing a draft is not part of the supported release edit slice."
+      },
+      {
+        "name": "--latest",
+        "summary": "Explicitly mark the release as latest",
+        "status": "unsupported",
+        "reason": "Explicit latest-release promotion is not part of the supported release edit slice."
+      },
+      {
+        "name": "--verify-tag",
+        "summary": "Abort if the tag does not already exist remotely",
+        "status": "unsupported",
+        "reason": "Remote tag verification is not part of the supported release edit slice."
+      }
+    ],
+    "releaseDeleteOptions": [
+      {
+        "name": "--yes",
+        "aliases": [
+          "-y"
+        ],
+        "summary": "Skip the confirmation prompt",
+        "status": "emulated",
+        "reason": "The supported release delete slice is already non-interactive, so --yes is accepted for gh compatibility."
+      },
+      {
+        "name": "--cleanup-tag",
+        "summary": "Delete the specified tag in addition to its release",
+        "status": "unsupported",
+        "reason": "Tag deletion is not part of the supported release delete slice."
+      }
+    ],
+    "releaseUploadOptions": [
+      {
+        "name": "--clobber",
+        "summary": "Delete and re-upload existing assets of the same name",
+        "status": "unsupported",
+        "reason": "Replacing existing assets during upload is not part of the supported release asset slice."
+      }
+    ],
+    "releaseDownloadOptions": [
+      {
+        "name": "--archive",
+        "aliases": [
+          "-A"
+        ],
+        "summary": "Download the source code archive in the specified format",
+        "status": "unsupported",
+        "reason": "Source archive download is not part of the supported release asset slice."
+      },
+      {
+        "name": "--clobber",
+        "summary": "Overwrite existing files of the same name",
+        "status": "unsupported",
+        "reason": "Overwriting existing files during download is not part of the supported release asset slice."
+      },
+      {
+        "name": "--dir",
+        "aliases": [
+          "-D"
+        ],
+        "summary": "The directory to download files into",
+        "status": "supported"
+      },
+      {
+        "name": "--output",
+        "aliases": [
+          "-O"
+        ],
+        "summary": "The file to write a single asset to",
+        "status": "unsupported",
+        "reason": "Redirecting a single asset to a custom output file is not part of the supported release asset slice."
+      },
+      {
+        "name": "--pattern",
+        "aliases": [
+          "-p"
+        ],
+        "summary": "Download only assets that match a glob pattern",
+        "status": "supported"
+      },
+      {
+        "name": "--skip-existing",
+        "summary": "Skip downloading when files of the same name exist",
+        "status": "unsupported",
+        "reason": "Skipping existing files during download is not part of the supported release asset slice."
       }
     ],
     "issueStructuredOutput": [
@@ -1277,27 +1507,52 @@
       {
         "name": "tagName",
         "summary": "Release tag name",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "name",
         "summary": "Release title",
-        "status": "unsupported"
+        "status": "supported"
+      },
+      {
+        "name": "body",
+        "summary": "Release notes",
+        "status": "supported"
+      },
+      {
+        "name": "createdAt",
+        "summary": "Release creation timestamp",
+        "status": "supported"
+      },
+      {
+        "name": "publishedAt",
+        "summary": "Release publication timestamp",
+        "status": "supported"
       },
       {
         "name": "isDraft",
         "summary": "Whether the release is a draft",
-        "status": "unsupported"
+        "status": "supported"
       },
       {
         "name": "isPrerelease",
         "summary": "Whether the release is a prerelease",
-        "status": "unsupported"
+        "status": "supported"
+      },
+      {
+        "name": "targetCommitish",
+        "summary": "Target branch or commit for the release tag",
+        "status": "supported"
       },
       {
         "name": "url",
         "summary": "Release web URL",
-        "status": "unsupported"
+        "status": "supported"
+      },
+      {
+        "name": "assets",
+        "summary": "Release asset metadata",
+        "status": "supported"
       }
     ],
     "repoRead": [
@@ -1639,8 +1894,7 @@
           "kind": "command",
           "name": "list",
           "summary": "List releases",
-          "status": "unsupported",
-          "reason": "Pending the release management slice (#9).",
+          "status": "supported",
           "flagProfiles": [
             "repositoryTarget",
             "structuredOutput"
@@ -1653,8 +1907,7 @@
           "kind": "command",
           "name": "view",
           "summary": "View a release",
-          "status": "unsupported",
-          "reason": "Pending the release management slice (#9).",
+          "status": "supported",
           "flagProfiles": [
             "repositoryTarget",
             "structuredOutput"
@@ -1667,50 +1920,52 @@
           "kind": "command",
           "name": "create",
           "summary": "Create a release",
-          "status": "unsupported",
-          "reason": "Pending the release management slice (#9).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "repositoryTarget",
+            "releaseCreateOptions",
+            "releaseCreateUnsupportedOptions"
           ]
         },
         {
           "kind": "command",
           "name": "edit",
           "summary": "Edit a release",
-          "status": "unsupported",
-          "reason": "Pending the release management slice (#9).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "repositoryTarget",
+            "releaseEditOptions",
+            "releaseEditUnsupportedOptions"
           ]
         },
         {
           "kind": "command",
           "name": "delete",
           "summary": "Delete a release",
-          "status": "unsupported",
-          "reason": "Pending the release management slice (#9).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "repositoryTarget",
+            "releaseDeleteOptions"
           ]
         },
         {
           "kind": "command",
           "name": "upload",
           "summary": "Upload an asset to a release",
-          "status": "unsupported",
-          "reason": "Pending the release management slice (#9).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "repositoryTarget",
+            "releaseUploadOptions"
           ]
         },
         {
           "kind": "command",
           "name": "download",
           "summary": "Download a release asset",
-          "status": "unsupported",
-          "reason": "Pending the release management slice (#9).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "repositoryTarget",
+            "releaseDownloadOptions"
           ]
         }
       ]

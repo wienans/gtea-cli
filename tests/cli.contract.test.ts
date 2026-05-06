@@ -749,6 +749,537 @@ test("repo fork creates a fork for the authenticated user", async () => {
   }
 });
 
+test("release list reads repository releases from the selected Gitea host", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/releases") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          tag_name: "v1.0.0",
+          name: "First stable release",
+          draft: false,
+          prerelease: false,
+          html_url: `http://127.0.0.1:${port}/octo/project/releases/tag/v1.0.0`
+        },
+        {
+          tag_name: "v1.1.0-rc1",
+          name: "Release candidate",
+          draft: true,
+          prerelease: true,
+          html_url: `http://127.0.0.1:${port}/octo/project/releases/tag/v1.1.0-rc1`
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["release", "list", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /v1\.0\.0 \[published\] First stable release/);
+    assert.match(result.stdout, /v1\.1\.0-rc1 \[draft, prerelease\] Release candidate/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("release view supports manifest-backed json output fields with asset metadata", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/releases/tags/v1.0.0") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        tag_name: "v1.0.0",
+        name: "First stable release",
+        body: "Release notes",
+        draft: false,
+        prerelease: false,
+        created_at: "2026-05-05T12:00:00Z",
+        published_at: "2026-05-06T12:00:00Z",
+        target_commitish: "main",
+        html_url: `http://127.0.0.1:${port}/octo/project/releases/tag/v1.0.0`,
+        assets: [
+          {
+            name: "gtea-windows.zip",
+            size: 1024,
+            browser_download_url: `http://127.0.0.1:${port}/downloads/gtea-windows.zip`,
+            content_type: "application/zip"
+          }
+        ]
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "release",
+      "view",
+      "v1.0.0",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "tagName,name,body,targetCommitish,assets,url"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      tagName: "v1.0.0",
+      name: "First stable release",
+      body: "Release notes",
+      targetCommitish: "main",
+      assets: [
+        {
+          name: "gtea-windows.zip",
+          size: 1024,
+          downloadUrl: `http://127.0.0.1:${port}/downloads/gtea-windows.zip`,
+          contentType: "application/zip"
+        }
+      ],
+      url: `http://127.0.0.1:${port}/octo/project/releases/tag/v1.0.0`
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("release create posts the selected release metadata to the Gitea host", async () => {
+  let port = 0;
+  let requestBody = "";
+
+  const server = createServer((request, response) => {
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/releases") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    assert.equal(request.headers.authorization, "token release-create-token");
+
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      requestBody += chunk;
+    });
+    request.on("end", () => {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          tag_name: "v1.2.3",
+          name: "Version 1.2.3",
+          body: "Bug fixes and polish",
+          draft: true,
+          prerelease: true,
+          target_commitish: "release-branch",
+          html_url: `http://127.0.0.1:${port}/octo/project/releases/tag/v1.2.3`
+        })
+      );
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "release",
+      "create",
+      "v1.2.3",
+      "-R",
+      "octo/project",
+      "--title",
+      "Version 1.2.3",
+      "--notes",
+      "Bug fixes and polish",
+      "--draft",
+      "--prerelease",
+      "--target",
+      "release-branch"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "release-create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/releases/tag/v1.2.3\n`);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(requestBody), {
+      tag_name: "v1.2.3",
+      name: "Version 1.2.3",
+      body: "Bug fixes and polish",
+      draft: true,
+      prerelease: true,
+      target_commitish: "release-branch"
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("release edit patches the selected release metadata on the Gitea host", async () => {
+  let port = 0;
+  let requestBody = "";
+
+  const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/releases/tags/v1.2.3") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          id: 42,
+          tag_name: "v1.2.3",
+          name: "Version 1.2.3",
+          body: "Existing notes",
+          draft: true,
+          prerelease: true,
+          target_commitish: "release-branch",
+          html_url: `http://127.0.0.1:${port}/octo/project/releases/tag/v1.2.3`
+        })
+      );
+      return;
+    }
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/project/releases/42") {
+      assert.equal(request.headers.authorization, "token release-edit-token");
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        requestBody += chunk;
+      });
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            tag_name: "v1.2.3",
+            name: "Version 1.2.3 Updated",
+            body: "Polished release notes",
+            draft: false,
+            prerelease: false,
+            target_commitish: "main",
+            html_url: `http://127.0.0.1:${port}/octo/project/releases/tag/v1.2.3`
+          })
+        );
+      });
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "release",
+      "edit",
+      "v1.2.3",
+      "-R",
+      "octo/project",
+      "--title",
+      "Version 1.2.3 Updated",
+      "--notes",
+      "Polished release notes",
+      "--draft=false",
+      "--prerelease=false",
+      "--target",
+      "main"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "release-edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/releases/tag/v1.2.3\n`);
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(requestBody), {
+      name: "Version 1.2.3 Updated",
+      body: "Polished release notes",
+      draft: false,
+      prerelease: false,
+      target_commitish: "main"
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("release delete removes the selected release quietly", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/releases/tags/v1.2.3") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: 42, tag_name: "v1.2.3" }));
+      return;
+    }
+
+    if (request.method === "DELETE" && request.url === "/api/v1/repos/octo/project/releases/42") {
+      assert.equal(request.headers.authorization, "token release-delete-token");
+      response.writeHead(204).end();
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "release",
+      "delete",
+      "v1.2.3",
+      "-R",
+      "octo/project",
+      "--yes"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "release-delete-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("release upload posts a release asset to the selected Gitea host", async () => {
+  let port = 0;
+  const assetRoot = mkdtempSync(join(tmpdir(), "gtea-release-upload-"));
+  const assetPath = join(assetRoot, "gtea-windows.zip");
+  const uploadedChunks: Buffer[] = [];
+
+  writeFileSync(assetPath, "zip-data", "utf8");
+
+  const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/releases/tags/v1.2.3") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: 42, tag_name: "v1.2.3" }));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/v1/repos/octo/project/releases/42/assets?name=gtea-windows.zip") {
+      assert.equal(request.headers.authorization, "token release-upload-token");
+      assert.equal(request.headers["content-type"], "application/octet-stream");
+      request.on("data", (chunk) => {
+        uploadedChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      request.on("end", () => {
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            name: "gtea-windows.zip",
+            size: 8,
+            browser_download_url: `http://127.0.0.1:${port}/downloads/gtea-windows.zip`
+          })
+        );
+      });
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "release",
+      "upload",
+      "v1.2.3",
+      "-R",
+      "octo/project",
+      assetPath
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "release-upload-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.equal(Buffer.concat(uploadedChunks).toString("utf8"), "zip-data");
+  } finally {
+    rmSync(assetRoot, { force: true, recursive: true });
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("release download saves matching assets into the requested directory", async () => {
+  let port = 0;
+  const downloadRoot = mkdtempSync(join(tmpdir(), "gtea-release-download-"));
+
+  const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/releases/tags/v1.2.3") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          tag_name: "v1.2.3",
+          assets: [
+            {
+              name: "gtea-windows.zip",
+              size: 8,
+              browser_download_url: `http://127.0.0.1:${port}/downloads/gtea-windows.zip`,
+              content_type: "application/zip"
+            },
+            {
+              name: "release-notes.txt",
+              size: 5,
+              browser_download_url: `http://127.0.0.1:${port}/downloads/release-notes.txt`,
+              content_type: "text/plain"
+            }
+          ]
+        })
+      );
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/downloads/gtea-windows.zip") {
+      assert.equal(request.headers.authorization, "token release-download-token");
+      response.writeHead(200, { "content-type": "application/octet-stream" });
+      response.end("zip-data");
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/downloads/release-notes.txt") {
+      response.writeHead(500, { "content-type": "text/plain" });
+      response.end("pattern should have filtered this asset");
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "release",
+      "download",
+      "v1.2.3",
+      "-R",
+      "octo/project",
+      "--dir",
+      downloadRoot,
+      "--pattern",
+      "*.zip"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "release-download-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.equal(readFileSync(join(downloadRoot, "gtea-windows.zip"), "utf8"), "zip-data");
+  } finally {
+    rmSync(downloadRoot, { force: true, recursive: true });
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("issue list requires a Repository Context when no repo is provided", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "gtea-issue-context-"));
 
