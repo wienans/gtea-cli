@@ -5950,10 +5950,93 @@ test("pr checkout uses the Git Toolchain to fetch and switch to the pull request
         resolve();
       })
     );
-
     rmSync(remoteRoot, { force: true, recursive: true });
     rmSync(sourceRoot, { force: true, recursive: true });
     rmSync(checkoutRoot, { force: true, recursive: true });
+  }
+});
+
+test("issue view json comments hydrate even when the issue payload omits commentCount", async () => {
+  let commentRequests = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 42,
+          title: "Ship the richer issue summary",
+          state: "open"
+        })
+      );
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      commentRequests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 1,
+            body: "First visible comment",
+            user: { login: "first-commenter" }
+          }
+        ])
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "comments,number"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(commentRequests, 1);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      comments: [
+        {
+          id: 1,
+          author: {
+            id: null,
+            login: "first-commenter",
+            name: null
+          },
+          body: "First visible comment",
+          createdAt: null,
+          updatedAt: null,
+          url: `http://127.0.0.1:${port}/octo/project/issues/42#issuecomment-1`
+        }
+      ],
+      number: 42
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
   }
 });
 

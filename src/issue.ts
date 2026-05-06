@@ -1715,7 +1715,7 @@ async function hydrateIssueRecordComments(
   const hydratedIssues: IssueRecord[] = [];
 
   for (const issue of issues) {
-    if (issue.commentCount === undefined) {
+    if (issue.comments !== undefined) {
       hydratedIssues.push(issue);
       continue;
     }
