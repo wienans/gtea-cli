@@ -446,7 +446,8 @@
       {
         "name": "--jq",
         "summary": "Filter JSON output with jq syntax",
-        "status": "unsupported",
+        "status": "emulated",
+        "reason": "Implements the pull request read slice's supported jq field-path subset.",
         "requires": [
           "--json"
         ]
@@ -454,7 +455,8 @@
       {
         "name": "--template",
         "summary": "Format JSON output with a Go template",
-        "status": "unsupported",
+        "status": "emulated",
+        "reason": "Implements the pull request read slice's supported field-interpolation template subset.",
         "requires": [
           "--json"
         ]
