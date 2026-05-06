@@ -2112,7 +2112,21 @@ test("issue list translates supported filters into the Gitea repository issue qu
         {
           number: 7,
           title: "Filter translation works",
-          state: "open"
+          state: "open",
+          labels: [
+            {
+              id: 100,
+              name: "bug",
+              description: "Bug work",
+              color: "ee0701"
+            },
+            {
+              id: 101,
+              name: "docs",
+              description: "Documentation work",
+              color: "0075ca"
+            }
+          ]
         }
       ])
     );
@@ -2155,6 +2169,167 @@ test("issue list translates supported filters into the Gitea repository issue qu
       }
     ]);
     assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue list enforces requested label filters on returned issues", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=open&labels=ready-for-agent") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          number: 7,
+          title: "This issue should be filtered out",
+          state: "open",
+          labels: [
+            {
+              id: 10,
+              name: "bug",
+              description: "Something is broken",
+              color: "ee0701"
+            }
+          ]
+        },
+        {
+          number: 8,
+          title: "This issue matches the requested label",
+          state: "open",
+          labels: [
+            {
+              id: 11,
+              name: "ready-for-agent",
+              description: "Queued for automation",
+              color: "006b75"
+            }
+          ]
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--label",
+      "ready-for-agent",
+      "--json",
+      "labels,number,title"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      {
+        labels: [
+          {
+            id: 11,
+            name: "ready-for-agent",
+            description: "Queued for automation",
+            color: "006b75"
+          }
+        ],
+        number: 8,
+        title: "This issue matches the requested label"
+      }
+    ]);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue list reports empty results after client-side label filtering", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=open&labels=ready-for-agent") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          number: 7,
+          title: "This issue should be filtered out",
+          state: "open",
+          labels: [
+            {
+              id: 10,
+              name: "bug",
+              description: "Something is broken",
+              color: "ee0701"
+            }
+          ]
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const jsonResult = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--label",
+      "ready-for-agent",
+      "--json",
+      "number"
+    ]);
+
+    assert.equal(jsonResult.exitCode, 0);
+    assert.deepEqual(JSON.parse(jsonResult.stdout), []);
+    assert.equal(jsonResult.stderr, "");
+
+    const textResult = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--label",
+      "ready-for-agent"
+    ]);
+
+    assert.equal(textResult.exitCode, 0);
+    assert.equal(textResult.stdout, "No open issues found.\n");
+    assert.equal(textResult.stderr, "");
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => {
