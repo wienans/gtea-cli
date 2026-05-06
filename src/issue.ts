@@ -1510,6 +1510,34 @@ function buildIssueListRequestUrl(repository: RepositoryContext, options: IssueL
   return `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues?${params.toString()}`;
 }
 
+function normalizeIssueLabelName(labelName: string): string {
+  return labelName.trim().toLowerCase();
+}
+
+function issueMatchesRequestedLabels(issue: GiteaIssuePayload, requestedLabels: string[]): boolean {
+  if (requestedLabels.length === 0) {
+    return true;
+  }
+
+  const requestedLabelNames = new Set(
+    requestedLabels
+      .map((labelName) => normalizeIssueLabelName(labelName))
+      .filter((labelName) => labelName.length > 0)
+  );
+
+  if (requestedLabelNames.size === 0) {
+    return true;
+  }
+
+  return issue.labels?.some((label) => {
+    if (typeof label?.name !== "string") {
+      return false;
+    }
+
+    return requestedLabelNames.has(normalizeIssueLabelName(label.name));
+  }) ?? false;
+}
+
 async function readIssue(
   repository: RepositoryContext,
   issueNumber: number,
@@ -2377,7 +2405,9 @@ async function readIssueList(
       };
     }
 
-    const issuesPayload = payload.filter((entry): entry is GiteaIssuePayload & { number: number } => hasIssueNumber(entry));
+    const issuesPayload = payload
+      .filter((entry): entry is GiteaIssuePayload & { number: number } => hasIssueNumber(entry))
+      .filter((entry) => issueMatchesRequestedLabels(entry, options.labels));
 
     return {
       issues: issuesPayload.map((entry) => mapIssueRecord(repository, entry, entry.number)),
