@@ -161,11 +161,11 @@ interface GiteaIssuePayload {
   updated_at?: string;
   closed_at?: string | null;
   pin_order?: number;
-  assignee?: GiteaUserPayload;
-  assignees?: GiteaUserPayload[];
-  user?: GiteaUserPayload;
-  labels?: GiteaLabelPayload[];
-  milestone?: GiteaMilestonePayload;
+  assignee?: GiteaUserPayload | null;
+  assignees?: Array<GiteaUserPayload | null> | null;
+  user?: GiteaUserPayload | null;
+  labels?: Array<GiteaLabelPayload | null> | null;
+  milestone?: GiteaMilestonePayload | null;
 }
 
 interface GiteaIssueCommentPayload {
@@ -174,7 +174,7 @@ interface GiteaIssueCommentPayload {
   created_at?: string;
   updated_at?: string;
   html_url?: string;
-  user?: GiteaUserPayload;
+  user?: GiteaUserPayload | null;
 }
 
 interface IssueUpdatePayload {
@@ -1198,7 +1198,7 @@ function applyStringListMutations(currentValues: string[], addValues: string[], 
 }
 
 function currentIssueAssignees(issue: GiteaIssuePayload): string[] {
-  const assigneeLogins = [issue.assignee?.login, ...(issue.assignees ?? []).map((assignee) => assignee.login)]
+  const assigneeLogins = [issue.assignee?.login, ...(issue.assignees ?? []).map((assignee) => assignee?.login)]
     .filter((login): login is string => typeof login === "string" && login.length > 0);
 
   return uniqueValues(assigneeLogins);
@@ -1207,7 +1207,7 @@ function currentIssueAssignees(issue: GiteaIssuePayload): string[] {
 function currentIssueLabelNames(issue: GiteaIssuePayload): string[] {
   return uniqueValues(
     (issue.labels ?? [])
-      .map((label) => label.name)
+      .map((label) => label?.name)
       .filter((label): label is string => typeof label === "string" && label.length > 0)
   );
 }
@@ -1228,8 +1228,16 @@ function buildIssueUrl(repository: RepositoryContext, issueNumber: number): stri
   return `${buildHostBaseUrl(repository.hostname)}/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}`;
 }
 
-function mapIssueUserRecord(payload?: GiteaUserPayload): IssueUserRecord | null {
-  if (payload === undefined) {
+function isObjectValue(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function hasIssueNumber(payload: unknown): payload is GiteaIssuePayload & { number: number } {
+  return isObjectValue(payload) && typeof payload.number === "number";
+}
+
+function mapIssueUserRecord(payload?: GiteaUserPayload | null): IssueUserRecord | null {
+  if (payload === undefined || payload === null) {
     return null;
   }
 
@@ -1248,7 +1256,11 @@ function mapIssueUserRecord(payload?: GiteaUserPayload): IssueUserRecord | null 
   };
 }
 
-function mapIssueLabelRecord(payload: GiteaLabelPayload): IssueLabelRecord | null {
+function mapIssueLabelRecord(payload?: GiteaLabelPayload | null): IssueLabelRecord | null {
+  if (payload === undefined || payload === null) {
+    return null;
+  }
+
   const id = typeof payload.id === "number" ? payload.id : null;
   const name = typeof payload.name === "string" ? payload.name : null;
   const description = typeof payload.description === "string" ? payload.description : null;
@@ -1290,8 +1302,8 @@ function mapIssueAssigneeRecords(payload: GiteaIssuePayload): IssueUserRecord[] 
   return assignees;
 }
 
-function mapIssueMilestoneRecord(payload?: GiteaMilestonePayload): IssueMilestoneRecord | null {
-  if (payload === undefined) {
+function mapIssueMilestoneRecord(payload?: GiteaMilestonePayload | null): IssueMilestoneRecord | null {
+  if (payload === undefined || payload === null) {
     return null;
   }
 
@@ -1309,8 +1321,12 @@ function mapIssueMilestoneRecord(payload?: GiteaMilestonePayload): IssueMileston
 function mapIssueCommentRecord(
   repository: RepositoryContext,
   issueNumber: number,
-  payload: GiteaIssueCommentPayload
-): IssueCommentRecord {
+  payload: GiteaIssueCommentPayload | null
+): IssueCommentRecord | null {
+  if (payload === null) {
+    return null;
+  }
+
   const author = mapIssueUserRecord(payload.user);
   const commentId = typeof payload.id === "number" ? payload.id : null;
 
@@ -1343,7 +1359,7 @@ function mapIssueRecord(repository: RepositoryContext, payload: GiteaIssuePayloa
     : [];
   const labelNames = Array.isArray(payload.labels)
     ? payload.labels
-      .map((label) => (typeof label.name === "string" ? label.name : undefined))
+      .map((label) => (typeof label?.name === "string" ? label.name : undefined))
       .filter((label): label is string => label !== undefined && label.length > 0)
     : [];
   const commentCount = typeof payload.comments === "number" ? payload.comments : undefined;
@@ -1557,8 +1573,20 @@ async function readIssuePayload(
       };
     }
 
+    const payload = await response.json() as unknown;
+
+    if (!isObjectValue(payload)) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned an invalid issue payload while reading issue #${issueNumber}.\n`
+        }
+      };
+    }
+
     return {
-      payload: await response.json() as GiteaIssuePayload
+      payload: payload as GiteaIssuePayload
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1617,8 +1645,21 @@ async function readIssueComments(
       };
     }
 
-    const payload = await response.json() as GiteaIssueCommentPayload[];
-    const comments = payload.map((comment) => mapIssueCommentRecord(repository, issueNumber, comment));
+    const payload = await response.json() as unknown;
+
+    if (!Array.isArray(payload)) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned an invalid issue comment payload while reading issue #${issueNumber}.\n`
+        }
+      };
+    }
+
+    const comments = payload
+      .map((comment) => mapIssueCommentRecord(repository, issueNumber, isObjectValue(comment) ? comment as GiteaIssueCommentPayload : null))
+      .filter((comment): comment is IssueCommentRecord => comment !== null);
 
     return { comments };
   } catch (error) {
@@ -2321,11 +2362,23 @@ async function readIssueList(
       };
     }
 
-    const payload = await response.json() as GiteaIssuePayload[];
+    const payload = await response.json() as unknown;
+
+    if (!Array.isArray(payload)) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned an invalid issue list payload for ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    const issuesPayload = payload.filter((entry): entry is GiteaIssuePayload & { number: number } => hasIssueNumber(entry));
 
     return {
-      issues: payload.map((entry, index) => mapIssueRecord(repository, entry, index + 1)),
-      payload
+      issues: issuesPayload.map((entry) => mapIssueRecord(repository, entry, entry.number)),
+      payload: issuesPayload
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -2478,7 +2531,7 @@ function isIssueAssignedToUser(issue: GiteaIssuePayload, login: string): boolean
     return true;
   }
 
-  return issue.assignees?.some((assignee) => assignee.login === login) ?? false;
+  return issue.assignees?.some((assignee) => assignee?.login === login) ?? false;
 }
 
 function isIssueOpenedByUser(issue: GiteaIssuePayload, login: string): boolean {

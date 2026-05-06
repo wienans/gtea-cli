@@ -1770,6 +1770,99 @@ test("issue list reads repository issues from the selected Gitea host", async ()
   }
 });
 
+test("issue list skips unusable entries and tolerates null nested records", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=open") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        null,
+        {
+          number: 42,
+          title: "Ship resilient issue reads",
+          state: "open",
+          user: null,
+          assignee: null,
+          assignees: [
+            null,
+            {
+              id: 11,
+              login: "hubot",
+              full_name: "Hub O. T."
+            }
+          ],
+          labels: [
+            null,
+            {
+              name: "feature"
+            }
+          ]
+        },
+        {
+          title: "This entry should be skipped",
+          state: "open"
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "list",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "assignees,author,labels,number,title"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      {
+        assignees: [
+          {
+            id: 11,
+            login: "hubot",
+            name: "Hub O. T."
+          }
+        ],
+        author: null,
+        labels: [
+          {
+            id: null,
+            name: "feature",
+            description: null,
+            color: null
+          }
+        ],
+        number: 42,
+        title: "Ship resilient issue reads"
+      }
+    ]);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
 test("issue list accepts an explicit http host-qualified -R target", async () => {
   const server = createServer((request, response) => {
     if (request.url !== "/api/v1/repos/octo/project/issues?state=open") {
@@ -2352,6 +2445,117 @@ test("issue view maps a lone Gitea assignee into the gh-shaped assignees field",
           name: "Hub O. T."
         }
       ]
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view tolerates null nested records and null comment entries", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          null,
+          {
+            id: 900,
+            body: "Latest discussion",
+            user: null
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.url !== "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 42,
+        title: "Ship resilient issue reads",
+        state: "open",
+        comments: 2,
+        user: null,
+        assignee: null,
+        assignees: [
+          null,
+          {
+            id: 11,
+            login: "hubot",
+            full_name: "Hub O. T."
+          }
+        ],
+        labels: [
+          null,
+          {
+            name: "feature"
+          }
+        ]
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+  const commentUrl = `http://127.0.0.1:${port}/octo/project/issues/42#issuecomment-900`;
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "assignees,author,comments,labels,number"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      assignees: [
+        {
+          id: 11,
+          login: "hubot",
+          name: "Hub O. T."
+        }
+      ],
+      author: null,
+      comments: [
+        {
+          id: 900,
+          author: null,
+          body: "Latest discussion",
+          createdAt: null,
+          updatedAt: null,
+          url: commentUrl
+        }
+      ],
+      labels: [
+        {
+          id: null,
+          name: "feature",
+          description: null,
+          color: null
+        }
+      ],
+      number: 42
     });
     assert.equal(result.stderr, "");
   } finally {
