@@ -1514,17 +1514,18 @@ function normalizeIssueLabelName(labelName: string): string {
   return labelName.trim().toLowerCase();
 }
 
-function issueMatchesRequestedLabels(issue: GiteaIssuePayload, requestedLabels: string[]): boolean {
-  if (requestedLabels.length === 0) {
-    return true;
-  }
-
-  const requestedLabelNames = new Set(
-    requestedLabels
+function normalizeIssueLabelNames(labelNames: string[]): ReadonlySet<string> {
+  return new Set(
+    labelNames
       .map((labelName) => normalizeIssueLabelName(labelName))
       .filter((labelName) => labelName.length > 0)
   );
+}
 
+function issueMatchesRequestedLabels(
+  issue: GiteaIssuePayload,
+  requestedLabelNames: ReadonlySet<string>
+): boolean {
   if (requestedLabelNames.size === 0) {
     return true;
   }
@@ -2405,9 +2406,10 @@ async function readIssueList(
       };
     }
 
+    const requestedLabelNames = normalizeIssueLabelNames(options.labels);
     const issuesPayload = payload
       .filter((entry): entry is GiteaIssuePayload & { number: number } => hasIssueNumber(entry))
-      .filter((entry) => issueMatchesRequestedLabels(entry, options.labels));
+      .filter((entry) => issueMatchesRequestedLabels(entry, requestedLabelNames));
 
     return {
       issues: issuesPayload.map((entry) => mapIssueRecord(repository, entry, entry.number)),
