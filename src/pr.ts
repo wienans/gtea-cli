@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import { buildHostBaseUrl, buildProcessEnv } from "./host-config.js";
@@ -17,6 +19,46 @@ interface ParsedPullRequestFlags {
   jsonFields?: string[];
   jqExpression?: string;
   template?: string;
+}
+
+interface ParsedPullRequestCreateFlags {
+  repository?: string;
+  title?: string;
+  body?: string;
+  bodyFile?: string;
+  base?: string;
+  head?: string;
+}
+
+interface ParsedPullRequestCommentFlags {
+  pullRequestNumber?: number;
+  repository?: string;
+  body?: string;
+  bodyFile?: string;
+}
+
+type PullRequestReviewEvent = "APPROVED" | "COMMENT" | "REQUEST_CHANGES";
+
+interface ParsedPullRequestReviewFlags {
+  pullRequestNumber?: number;
+  repository?: string;
+  body?: string;
+  bodyFile?: string;
+  event?: PullRequestReviewEvent;
+}
+
+type PullRequestMergeMethod = "merge" | "rebase" | "squash";
+
+interface ParsedPullRequestMergeFlags {
+  pullRequestNumber?: number;
+  repository?: string;
+  body?: string;
+  bodyFile?: string;
+  subject?: string;
+  method?: PullRequestMergeMethod;
+  deleteBranch?: boolean;
+  admin?: boolean;
+  matchHeadCommit?: string;
 }
 
 interface PullRequestRecord {
@@ -51,10 +93,18 @@ const prViewCommand = prGroup?.children.find(
 );
 const prOutputFields = new Set((prViewCommand?.outputFields ?? []).map((field) => field.name));
 
+function renderUnsupportedPullRequestFlag(subcommand: string, flag: string, reason: string): CliResult {
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr: `${supportManifest.cliName} pr ${subcommand} flag ${flag} is currently unsupported: ${reason}\n`
+  };
+}
+
 function parseStringFlagValue(
   args: string[],
   index: number,
-  options: { long: string; short?: string }
+  options: { long: string; short?: string; allowDashValue?: boolean }
 ): { handled: boolean; nextIndex: number; value?: string; error?: CliResult } {
   const token = args[index];
   const longPrefix = `${options.long}=`;
@@ -77,7 +127,10 @@ function parseStringFlagValue(
 
   const rawValue = args[index + 1];
 
-  if (rawValue === undefined || rawValue.startsWith("-")) {
+  if (
+    rawValue === undefined
+    || (rawValue.startsWith("-") && !(options.allowDashValue === true && rawValue === "-"))
+  ) {
     return {
       handled: true,
       nextIndex: index,
@@ -208,6 +261,750 @@ function parsePullRequestFlags(args: string[]): { flags: ParsedPullRequestFlags;
   return { flags };
 }
 
+function parsePullRequestCreateFlags(args: string[]): { flags: ParsedPullRequestCreateFlags; error?: CliResult } {
+  const flags: ParsedPullRequestCreateFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
+
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
+
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
+      continue;
+    }
+
+    const createUnsupportedValueFlags = [
+      {
+        long: "--assignee",
+        short: "-a",
+        reason: "Pull request assignee planning is not part of the supported pull request create slice."
+      },
+      {
+        long: "--label",
+        short: "-l",
+        reason: "Pull request label planning is not part of the supported pull request create slice."
+      },
+      {
+        long: "--milestone",
+        short: "-m",
+        reason: "Pull request milestone planning is not part of the supported pull request create slice."
+      },
+      {
+        long: "--project",
+        short: "-p",
+        reason: "Project assignment is not part of the supported pull request create slice."
+      },
+      {
+        long: "--recover",
+        reason: "Draft recovery is not part of the supported pull request create slice."
+      },
+      {
+        long: "--reviewer",
+        short: "-r",
+        reason: "Reviewer assignment is not part of the supported pull request create slice."
+      },
+      {
+        long: "--template",
+        short: "-T",
+        reason: "Template expansion is not part of the supported pull request create slice."
+      }
+    ] as const;
+
+    for (const unsupportedFlag of createUnsupportedValueFlags) {
+      const unsupportedValueFlag = parseStringFlagValue(args, index, unsupportedFlag);
+
+      if (unsupportedValueFlag.error !== undefined) {
+        return {
+          flags,
+          error: unsupportedValueFlag.error
+        };
+      }
+
+      if (unsupportedValueFlag.handled) {
+        return {
+          flags,
+          error: renderUnsupportedPullRequestFlag("create", unsupportedFlag.long, unsupportedFlag.reason)
+        };
+      }
+    }
+
+    const createUnsupportedBooleanFlags: Array<{ long: string; short?: string; reason: string }> = [
+      {
+        long: "--draft",
+        short: "-d",
+        reason: "Draft pull request creation is not part of the supported pull request write slice."
+      },
+      {
+        long: "--dry-run",
+        reason: "Previewing or pushing PR branches without creating the pull request is not part of the supported pull request create slice."
+      },
+      {
+        long: "--editor",
+        short: "-e",
+        reason: "Interactive editor-driven pull request drafting is not part of the supported pull request create slice."
+      },
+      {
+        long: "--fill",
+        short: "-f",
+        reason: "Commit-based autofill is not part of the supported pull request create slice."
+      },
+      {
+        long: "--fill-first",
+        reason: "Commit-based autofill is not part of the supported pull request create slice."
+      },
+      {
+        long: "--fill-verbose",
+        reason: "Commit-based autofill is not part of the supported pull request create slice."
+      },
+      {
+        long: "--no-maintainer-edit",
+        reason: "Maintainer edit policy changes are not part of the supported pull request create slice."
+      },
+      {
+        long: "--web",
+        short: "-w",
+        reason: "Browser-driven pull request creation is not part of the supported pull request create slice."
+      }
+    ] as const;
+
+    for (const unsupportedFlag of createUnsupportedBooleanFlags) {
+      if (token === unsupportedFlag.long || (unsupportedFlag.short !== undefined && token === unsupportedFlag.short)) {
+        return {
+          flags,
+          error: renderUnsupportedPullRequestFlag("create", unsupportedFlag.long, unsupportedFlag.reason)
+        };
+      }
+    }
+
+    const titleFlag = parseStringFlagValue(args, index, { long: "--title", short: "-t" });
+
+    if (titleFlag.error !== undefined) {
+      return {
+        flags,
+        error: titleFlag.error
+      };
+    }
+
+    if (titleFlag.handled && titleFlag.value !== undefined) {
+      flags.title = titleFlag.value;
+      index = titleFlag.nextIndex;
+      continue;
+    }
+
+    const bodyFlag = parseStringFlagValue(args, index, { long: "--body", short: "-b" });
+
+    if (bodyFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFlag.error
+      };
+    }
+
+    if (bodyFlag.handled && bodyFlag.value !== undefined) {
+      flags.body = bodyFlag.value;
+      index = bodyFlag.nextIndex;
+      continue;
+    }
+
+    const bodyFileFlag = parseStringFlagValue(args, index, { long: "--body-file", short: "-F", allowDashValue: true });
+
+    if (bodyFileFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFileFlag.error
+      };
+    }
+
+    if (bodyFileFlag.handled && bodyFileFlag.value !== undefined) {
+      flags.bodyFile = bodyFileFlag.value;
+      index = bodyFileFlag.nextIndex;
+      continue;
+    }
+
+    const baseFlag = parseStringFlagValue(args, index, { long: "--base", short: "-B" });
+
+    if (baseFlag.error !== undefined) {
+      return {
+        flags,
+        error: baseFlag.error
+      };
+    }
+
+    if (baseFlag.handled && baseFlag.value !== undefined) {
+      flags.base = baseFlag.value;
+      index = baseFlag.nextIndex;
+      continue;
+    }
+
+    const headFlag = parseStringFlagValue(args, index, { long: "--head", short: "-H" });
+
+    if (headFlag.error !== undefined) {
+      return {
+        flags,
+        error: headFlag.error
+      };
+    }
+
+    if (headFlag.handled && headFlag.value !== undefined) {
+      flags.head = headFlag.value;
+      index = headFlag.nextIndex;
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    return {
+      flags,
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Unexpected argument: ${token}\n`
+      }
+    };
+  }
+
+  return { flags };
+}
+
+function resolvePullRequestBodyInput(
+  flags: { body?: string; bodyFile?: string },
+  context: ResolvedCliExecutionContext
+): { body?: string; error?: CliResult } {
+  if (flags.body !== undefined && flags.bodyFile !== undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Specify only one of --body or --body-file.\n"
+      }
+    };
+  }
+
+  if (flags.bodyFile === undefined) {
+    return {
+      ...(flags.body === undefined ? {} : { body: flags.body })
+    };
+  }
+
+  if (flags.bodyFile === "-") {
+    return {
+      body: context.stdin
+    };
+  }
+
+  try {
+    return {
+      body: readFileSync(resolvePath(context.cwd, flags.bodyFile), "utf8")
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read pull request body from ${flags.bodyFile}: ${message}\n`
+      }
+    };
+  }
+}
+
+function parsePullRequestCommentFlags(args: string[]): { flags: ParsedPullRequestCommentFlags; error?: CliResult } {
+  const flags: ParsedPullRequestCommentFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
+
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
+
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
+      continue;
+    }
+
+    const commentUnsupportedBooleanFlags: Array<{ long: string; short?: string; reason: string }> = [
+      {
+        long: "--create-if-none",
+        reason: "Editing or synthesizing prior pull request comments is not part of the supported pull request comment slice."
+      },
+      {
+        long: "--delete-last",
+        reason: "Deleting prior pull request comments is not part of the supported pull request comment slice."
+      },
+      {
+        long: "--edit-last",
+        reason: "Editing prior pull request comments is not part of the supported pull request comment slice."
+      },
+      {
+        long: "--editor",
+        short: "-e",
+        reason: "Interactive editor-driven pull request comments are not part of the supported pull request comment slice."
+      },
+      {
+        long: "--web",
+        short: "-w",
+        reason: "Browser-driven pull request comments are not part of the supported pull request comment slice."
+      },
+      {
+        long: "--yes",
+        reason: "Delete confirmation control is not part of the supported pull request comment slice."
+      }
+    ] as const;
+
+    for (const unsupportedFlag of commentUnsupportedBooleanFlags) {
+      if (token === unsupportedFlag.long || (unsupportedFlag.short !== undefined && token === unsupportedFlag.short)) {
+        return {
+          flags,
+          error: renderUnsupportedPullRequestFlag("comment", unsupportedFlag.long, unsupportedFlag.reason)
+        };
+      }
+    }
+
+    const bodyFlag = parseStringFlagValue(args, index, { long: "--body", short: "-b" });
+
+    if (bodyFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFlag.error
+      };
+    }
+
+    if (bodyFlag.handled && bodyFlag.value !== undefined) {
+      flags.body = bodyFlag.value;
+      index = bodyFlag.nextIndex;
+      continue;
+    }
+
+    const bodyFileFlag = parseStringFlagValue(args, index, { long: "--body-file", short: "-F", allowDashValue: true });
+
+    if (bodyFileFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFileFlag.error
+      };
+    }
+
+    if (bodyFileFlag.handled && bodyFileFlag.value !== undefined) {
+      flags.bodyFile = bodyFileFlag.value;
+      index = bodyFileFlag.nextIndex;
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    if (flags.pullRequestNumber !== undefined) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unexpected argument: ${token}\n`
+        }
+      };
+    }
+
+    if (!/^\d+$/.test(token)) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Invalid pull request number: ${token}\n`
+        }
+      };
+    }
+
+    flags.pullRequestNumber = Number.parseInt(token, 10);
+  }
+
+  return { flags };
+}
+
+function parsePullRequestReviewFlags(args: string[]): { flags: ParsedPullRequestReviewFlags; error?: CliResult } {
+  const flags: ParsedPullRequestReviewFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
+
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
+
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
+      continue;
+    }
+
+    const bodyFlag = parseStringFlagValue(args, index, { long: "--body", short: "-b" });
+
+    if (bodyFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFlag.error
+      };
+    }
+
+    if (bodyFlag.handled && bodyFlag.value !== undefined) {
+      flags.body = bodyFlag.value;
+      index = bodyFlag.nextIndex;
+      continue;
+    }
+
+    const bodyFileFlag = parseStringFlagValue(args, index, { long: "--body-file", short: "-F", allowDashValue: true });
+
+    if (bodyFileFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFileFlag.error
+      };
+    }
+
+    if (bodyFileFlag.handled && bodyFileFlag.value !== undefined) {
+      flags.bodyFile = bodyFileFlag.value;
+      index = bodyFileFlag.nextIndex;
+      continue;
+    }
+
+    if (token === "--approve" || token === "-a") {
+      if (flags.event !== undefined) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Specify at most one of --approve, --comment, and --request-changes.\n"
+          }
+        };
+      }
+
+      flags.event = "APPROVED";
+      continue;
+    }
+
+    if (token === "--comment" || token === "-c") {
+      if (flags.event !== undefined) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Specify at most one of --approve, --comment, and --request-changes.\n"
+          }
+        };
+      }
+
+      flags.event = "COMMENT";
+      continue;
+    }
+
+    if (token === "--request-changes" || token === "-r") {
+      if (flags.event !== undefined) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Specify at most one of --approve, --comment, and --request-changes.\n"
+          }
+        };
+      }
+
+      flags.event = "REQUEST_CHANGES";
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    if (flags.pullRequestNumber !== undefined) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unexpected argument: ${token}\n`
+        }
+      };
+    }
+
+    if (!/^\d+$/.test(token)) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Invalid pull request number: ${token}\n`
+        }
+      };
+    }
+
+    flags.pullRequestNumber = Number.parseInt(token, 10);
+  }
+
+  return { flags };
+}
+
+function parsePullRequestMergeFlags(args: string[]): { flags: ParsedPullRequestMergeFlags; error?: CliResult } {
+  const flags: ParsedPullRequestMergeFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
+
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
+
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
+      continue;
+    }
+
+    const authorEmailFlag = parseStringFlagValue(args, index, { long: "--author-email", short: "-A" });
+
+    if (authorEmailFlag.error !== undefined) {
+      return {
+        flags,
+        error: authorEmailFlag.error
+      };
+    }
+
+    if (authorEmailFlag.handled) {
+      return {
+        flags,
+        error: renderUnsupportedPullRequestFlag(
+          "merge",
+          "--author-email",
+          "Setting a custom merge author email is not part of the supported pull request merge slice."
+        )
+      };
+    }
+
+    if (token === "--auto") {
+      return {
+        flags,
+        error: renderUnsupportedPullRequestFlag(
+          "merge",
+          "--auto",
+          "Auto-merge queue semantics are not part of the supported pull request merge slice."
+        )
+      };
+    }
+
+    if (token === "--disable-auto") {
+      return {
+        flags,
+        error: renderUnsupportedPullRequestFlag(
+          "merge",
+          "--disable-auto",
+          "Disabling scheduled auto-merge is not part of the supported pull request merge slice."
+        )
+      };
+    }
+
+    const bodyFlag = parseStringFlagValue(args, index, { long: "--body", short: "-b" });
+
+    if (bodyFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFlag.error
+      };
+    }
+
+    if (bodyFlag.handled && bodyFlag.value !== undefined) {
+      flags.body = bodyFlag.value;
+      index = bodyFlag.nextIndex;
+      continue;
+    }
+
+    const bodyFileFlag = parseStringFlagValue(args, index, { long: "--body-file", short: "-F", allowDashValue: true });
+
+    if (bodyFileFlag.error !== undefined) {
+      return {
+        flags,
+        error: bodyFileFlag.error
+      };
+    }
+
+    if (bodyFileFlag.handled && bodyFileFlag.value !== undefined) {
+      flags.bodyFile = bodyFileFlag.value;
+      index = bodyFileFlag.nextIndex;
+      continue;
+    }
+
+    const subjectFlag = parseStringFlagValue(args, index, { long: "--subject", short: "-t" });
+
+    if (subjectFlag.error !== undefined) {
+      return {
+        flags,
+        error: subjectFlag.error
+      };
+    }
+
+    if (subjectFlag.handled && subjectFlag.value !== undefined) {
+      flags.subject = subjectFlag.value;
+      index = subjectFlag.nextIndex;
+      continue;
+    }
+
+    const matchHeadCommitFlag = parseStringFlagValue(args, index, { long: "--match-head-commit" });
+
+    if (matchHeadCommitFlag.error !== undefined) {
+      return {
+        flags,
+        error: matchHeadCommitFlag.error
+      };
+    }
+
+    if (matchHeadCommitFlag.handled && matchHeadCommitFlag.value !== undefined) {
+      flags.matchHeadCommit = matchHeadCommitFlag.value;
+      index = matchHeadCommitFlag.nextIndex;
+      continue;
+    }
+
+    if (token === "--delete-branch" || token === "-d") {
+      flags.deleteBranch = true;
+      continue;
+    }
+
+    if (token === "--admin") {
+      flags.admin = true;
+      continue;
+    }
+
+    const mergeMethod = token === "--merge" || token === "-m"
+      ? "merge"
+      : token === "--rebase" || token === "-r"
+        ? "rebase"
+        : token === "--squash" || token === "-s"
+          ? "squash"
+          : undefined;
+
+    if (mergeMethod !== undefined) {
+      if (flags.method !== undefined) {
+        return {
+          flags,
+          error: {
+            exitCode: 1,
+            stdout: "",
+            stderr: "Specify at most one of --merge, --rebase, and --squash.\n"
+          }
+        };
+      }
+
+      flags.method = mergeMethod;
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    if (flags.pullRequestNumber !== undefined) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unexpected argument: ${token}\n`
+        }
+      };
+    }
+
+    if (!/^\d+$/.test(token)) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Invalid pull request number: ${token}\n`
+        }
+      };
+    }
+
+    flags.pullRequestNumber = Number.parseInt(token, 10);
+  }
+
+  return { flags };
+}
+
 function buildPullRequestUrl(repository: RepositoryContext, pullRequestNumber: number): string {
   return `${buildHostBaseUrl(repository.hostname)}/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}`;
 }
@@ -227,6 +1024,409 @@ function mapPullRequestRecord(
     baseRefName: typeof payload.base?.ref === "string" ? payload.base.ref : "unknown",
     url: buildPullRequestUrl(repository, number)
   };
+}
+
+async function readGiteaErrorMessage(response: Response): Promise<string | undefined> {
+  try {
+    const payload = await response.json() as { message?: string };
+
+    return typeof payload.message === "string" && payload.message.length > 0 ? payload.message : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function createPullRequest(
+  repository: RepositoryContext,
+  flags: { title: string; base: string; head: string; body?: string },
+  context: ResolvedCliExecutionContext
+): Promise<{ pullRequest?: PullRequestRecord; error?: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  if (token === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "gtea pr create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+      }
+    };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls`;
+  const requestBody = flags.body === undefined
+    ? { title: flags.title, base: flags.base, head: flags.head }
+    : { title: flags.title, body: flags.body, base: flags.base, head: flags.head };
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while creating a pull request on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while creating a pull request in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while creating a pull request in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while creating a pull request in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {
+      pullRequest: mapPullRequestRecord(repository, await response.json() as GiteaPullRequestPayload, 0)
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to create a pull request on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function commentOnPullRequest(
+  repository: RepositoryContext,
+  pullRequestNumber: number,
+  body: string,
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  if (token === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "gtea pr comment requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+      }
+    };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${pullRequestNumber}/comments`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ body })
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while commenting on pull request #${pullRequestNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 404) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Pull request #${pullRequestNumber} was not found in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while commenting on pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while commenting on pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while commenting on pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to comment on pull request #${pullRequestNumber} on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function reviewPullRequest(
+  repository: RepositoryContext,
+  pullRequestNumber: number,
+  review: { event: PullRequestReviewEvent; body?: string },
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  if (token === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "gtea pr review requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+      }
+    };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}/reviews`;
+  const requestBody = review.body === undefined
+    ? { event: review.event }
+    : { event: review.event, body: review.body };
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while reviewing pull request #${pullRequestNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 404) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Pull request #${pullRequestNumber} was not found in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while reviewing pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while reviewing pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while reviewing pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to review pull request #${pullRequestNumber} on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function mergePullRequest(
+  repository: RepositoryContext,
+  pullRequestNumber: number,
+  mergeOptions: {
+    method: PullRequestMergeMethod;
+    body?: string;
+    subject?: string;
+    deleteBranch?: boolean;
+    admin?: boolean;
+    matchHeadCommit?: string;
+  },
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  const token = resolveOptionalToken(repository.hostname, context);
+
+  if (token === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "gtea pr merge requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+      }
+    };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}/merge`;
+  const requestBody: Record<string, boolean | string> = {
+    do: mergeOptions.method
+  };
+
+  if (mergeOptions.deleteBranch === true) {
+    requestBody.delete_branch_after_merge = true;
+  }
+
+  if (mergeOptions.admin === true) {
+    requestBody.force_merge = true;
+  }
+
+  if (mergeOptions.matchHeadCommit !== undefined) {
+    requestBody.head_commit_id = mergeOptions.matchHeadCommit;
+  }
+
+  if (mergeOptions.subject !== undefined) {
+    requestBody.merge_title_field = mergeOptions.subject;
+  }
+
+  if (mergeOptions.body !== undefined) {
+    requestBody.merge_message_field = mergeOptions.body;
+  }
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while merging pull request #${pullRequestNumber} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 404) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Pull request #${pullRequestNumber} was not found in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while merging pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while merging pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (response.status === 405 || response.status === 409) {
+      const mergeBlockMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: mergeBlockMessage === undefined
+            ? `Merge blocked for pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}.\n`
+            : `Merge blocked for pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}: ${mergeBlockMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while merging pull request #${pullRequestNumber} in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to merge pull request #${pullRequestNumber} on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
 }
 
 async function readPullRequest(
@@ -657,12 +1857,260 @@ function renderStructuredPullRequestOutput(
 export async function executePrCommand(args: string[], context: ResolvedCliExecutionContext): Promise<CliResult | undefined> {
   if (
     args[0] !== "pr"
-    || (args[1] !== "view" && args[1] !== "list" && args[1] !== "status" && args[1] !== "diff" && args[1] !== "checkout")
+    || (args[1] !== "view" && args[1] !== "list" && args[1] !== "status" && args[1] !== "diff" && args[1] !== "checkout" && args[1] !== "create" && args[1] !== "comment" && args[1] !== "review" && args[1] !== "merge")
   ) {
     return undefined;
   }
 
   const subcommand = args[1];
+
+  if (subcommand === "create") {
+    const parsedCreateFlags = parsePullRequestCreateFlags(args.slice(2));
+
+    if (parsedCreateFlags.error !== undefined) {
+      return parsedCreateFlags.error;
+    }
+
+    const bodyInputResult = resolvePullRequestBodyInput(parsedCreateFlags.flags, context);
+
+    if (bodyInputResult.error !== undefined) {
+      return bodyInputResult.error;
+    }
+
+    if (parsedCreateFlags.flags.title === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "--title is required.\n"
+      };
+    }
+
+    if (parsedCreateFlags.flags.base === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "--base is required.\n"
+      };
+    }
+
+    if (parsedCreateFlags.flags.head === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "--head is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedCreateFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const createResult = await createPullRequest(
+      repositoryResult.repository,
+      {
+        title: parsedCreateFlags.flags.title,
+        base: parsedCreateFlags.flags.base,
+        head: parsedCreateFlags.flags.head,
+        ...(bodyInputResult.body === undefined ? {} : { body: bodyInputResult.body })
+      },
+      context
+    );
+
+    if (createResult.error !== undefined || createResult.pullRequest === undefined) {
+      return createResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to create pull request.\n"
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: `${createResult.pullRequest.url}\n`,
+      stderr: ""
+    };
+  }
+
+  if (subcommand === "comment") {
+    const parsedCommentFlags = parsePullRequestCommentFlags(args.slice(2));
+
+    if (parsedCommentFlags.error !== undefined) {
+      return parsedCommentFlags.error;
+    }
+
+    const bodyInputResult = resolvePullRequestBodyInput(parsedCommentFlags.flags, context);
+
+    if (bodyInputResult.error !== undefined) {
+      return bodyInputResult.error;
+    }
+
+    if (parsedCommentFlags.flags.pullRequestNumber === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Pull request number is required.\n"
+      };
+    }
+
+    if (bodyInputResult.body === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "--body is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedCommentFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const commentResult = await commentOnPullRequest(
+      repositoryResult.repository,
+      parsedCommentFlags.flags.pullRequestNumber,
+      bodyInputResult.body,
+      context
+    );
+
+    if (commentResult.error !== undefined) {
+      return commentResult.error;
+    }
+
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    };
+  }
+
+  if (subcommand === "review") {
+    const parsedReviewFlags = parsePullRequestReviewFlags(args.slice(2));
+
+    if (parsedReviewFlags.error !== undefined) {
+      return parsedReviewFlags.error;
+    }
+
+    const bodyInputResult = resolvePullRequestBodyInput(parsedReviewFlags.flags, context);
+
+    if (bodyInputResult.error !== undefined) {
+      return bodyInputResult.error;
+    }
+
+    if (parsedReviewFlags.flags.pullRequestNumber === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Pull request number is required.\n"
+      };
+    }
+
+    if (parsedReviewFlags.flags.event === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Specify one of --approve, --comment, or --request-changes.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedReviewFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const reviewResult = await reviewPullRequest(
+      repositoryResult.repository,
+      parsedReviewFlags.flags.pullRequestNumber,
+      {
+        event: parsedReviewFlags.flags.event,
+        ...(bodyInputResult.body === undefined ? {} : { body: bodyInputResult.body })
+      },
+      context
+    );
+
+    if (reviewResult.error !== undefined) {
+      return reviewResult.error;
+    }
+
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    };
+  }
+
+  if (subcommand === "merge") {
+    const parsedMergeFlags = parsePullRequestMergeFlags(args.slice(2));
+
+    if (parsedMergeFlags.error !== undefined) {
+      return parsedMergeFlags.error;
+    }
+
+    const bodyInputResult = resolvePullRequestBodyInput(parsedMergeFlags.flags, context);
+
+    if (bodyInputResult.error !== undefined) {
+      return bodyInputResult.error;
+    }
+
+    if (parsedMergeFlags.flags.pullRequestNumber === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Pull request number is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryContext(parsedMergeFlags.flags.repository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const mergeResult = await mergePullRequest(
+      repositoryResult.repository,
+      parsedMergeFlags.flags.pullRequestNumber,
+      {
+        method: parsedMergeFlags.flags.method ?? "merge",
+        ...(bodyInputResult.body === undefined ? {} : { body: bodyInputResult.body }),
+        ...(parsedMergeFlags.flags.subject === undefined ? {} : { subject: parsedMergeFlags.flags.subject }),
+        ...(parsedMergeFlags.flags.deleteBranch === undefined ? {} : { deleteBranch: parsedMergeFlags.flags.deleteBranch }),
+        ...(parsedMergeFlags.flags.admin === undefined ? {} : { admin: parsedMergeFlags.flags.admin }),
+        ...(parsedMergeFlags.flags.matchHeadCommit === undefined
+          ? {}
+          : { matchHeadCommit: parsedMergeFlags.flags.matchHeadCommit })
+      },
+      context
+    );
+
+    if (mergeResult.error !== undefined) {
+      return mergeResult.error;
+    }
+
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    };
+  }
 
   const parsedFlags = parsePullRequestFlags(args.slice(2));
 

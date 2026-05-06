@@ -460,6 +460,365 @@
         ]
       }
     ],
+    "prCreateOptions": [
+      {
+        "name": "--base",
+        "aliases": [
+          "-B"
+        ],
+        "summary": "The branch into which you want your code merged",
+        "status": "supported"
+      },
+      {
+        "name": "--body",
+        "aliases": [
+          "-b"
+        ],
+        "summary": "Body for the pull request",
+        "status": "supported"
+      },
+      {
+        "name": "--body-file",
+        "aliases": [
+          "-F"
+        ],
+        "summary": "Read body text from file (use \"-\" to read from standard input)",
+        "status": "supported"
+      },
+      {
+        "name": "--head",
+        "aliases": [
+          "-H"
+        ],
+        "summary": "The branch that contains commits for your pull request",
+        "status": "supported"
+      },
+      {
+        "name": "--title",
+        "aliases": [
+          "-t"
+        ],
+        "summary": "Title for the pull request",
+        "status": "supported"
+      }
+    ],
+    "prCreateUnsupportedOptions": [
+      {
+        "name": "--assignee",
+        "aliases": [
+          "-a"
+        ],
+        "summary": "Assign people by their login",
+        "status": "unsupported",
+        "reason": "Pull request assignee planning is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--draft",
+        "aliases": [
+          "-d"
+        ],
+        "summary": "Mark pull request as a draft",
+        "status": "unsupported",
+        "reason": "Draft pull request creation is not part of the supported pull request write slice."
+      },
+      {
+        "name": "--dry-run",
+        "summary": "Print details instead of creating the pull request",
+        "status": "unsupported",
+        "reason": "Previewing or pushing PR branches without creating the pull request is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--editor",
+        "aliases": [
+          "-e"
+        ],
+        "summary": "Skip prompts and open the text editor to write the title and body in",
+        "status": "unsupported",
+        "reason": "Interactive editor-driven pull request drafting is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--fill",
+        "aliases": [
+          "-f"
+        ],
+        "summary": "Use commit info for title and body",
+        "status": "unsupported",
+        "reason": "Commit-based autofill is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--fill-first",
+        "summary": "Use first commit info for title and body",
+        "status": "unsupported",
+        "reason": "Commit-based autofill is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--fill-verbose",
+        "summary": "Use commit message and body for the PR description",
+        "status": "unsupported",
+        "reason": "Commit-based autofill is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--label",
+        "aliases": [
+          "-l"
+        ],
+        "summary": "Add labels by name",
+        "status": "unsupported",
+        "reason": "Pull request label planning is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--milestone",
+        "aliases": [
+          "-m"
+        ],
+        "summary": "Add the pull request to a milestone by name",
+        "status": "unsupported",
+        "reason": "Pull request milestone planning is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--no-maintainer-edit",
+        "summary": "Disable maintainer's ability to modify pull request",
+        "status": "unsupported",
+        "reason": "Maintainer edit policy changes are not part of the supported pull request create slice."
+      },
+      {
+        "name": "--project",
+        "aliases": [
+          "-p"
+        ],
+        "summary": "Add the pull request to projects by title",
+        "status": "unsupported",
+        "reason": "Project assignment is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--recover",
+        "summary": "Recover input from a failed run of create",
+        "status": "unsupported",
+        "reason": "Draft recovery is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--reviewer",
+        "aliases": [
+          "-r"
+        ],
+        "summary": "Request reviews from people or teams by their handle",
+        "status": "unsupported",
+        "reason": "Reviewer assignment is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--template",
+        "aliases": [
+          "-T"
+        ],
+        "summary": "Template file to use as starting body text",
+        "status": "unsupported",
+        "reason": "Template expansion is not part of the supported pull request create slice."
+      },
+      {
+        "name": "--web",
+        "aliases": [
+          "-w"
+        ],
+        "summary": "Open the web browser to create a pull request",
+        "status": "unsupported",
+        "reason": "Browser-driven pull request creation is not part of the supported pull request create slice."
+      }
+    ],
+    "prCommentOptions": [
+      {
+        "name": "--body",
+        "aliases": [
+          "-b"
+        ],
+        "summary": "The comment body text",
+        "status": "supported"
+      },
+      {
+        "name": "--body-file",
+        "aliases": [
+          "-F"
+        ],
+        "summary": "Read body text from file (use \"-\" to read from standard input)",
+        "status": "supported"
+      }
+    ],
+    "prCommentUnsupportedOptions": [
+      {
+        "name": "--create-if-none",
+        "summary": "Create a new comment if no comments are found",
+        "status": "unsupported",
+        "reason": "Editing or synthesizing prior pull request comments is not part of the supported pull request comment slice."
+      },
+      {
+        "name": "--delete-last",
+        "summary": "Delete the last comment of the current user",
+        "status": "unsupported",
+        "reason": "Deleting prior pull request comments is not part of the supported pull request comment slice."
+      },
+      {
+        "name": "--edit-last",
+        "summary": "Edit the last comment of the current user",
+        "status": "unsupported",
+        "reason": "Editing prior pull request comments is not part of the supported pull request comment slice."
+      },
+      {
+        "name": "--editor",
+        "aliases": [
+          "-e"
+        ],
+        "summary": "Skip prompts and open the text editor to write the body in",
+        "status": "unsupported",
+        "reason": "Interactive editor-driven pull request comments are not part of the supported pull request comment slice."
+      },
+      {
+        "name": "--web",
+        "aliases": [
+          "-w"
+        ],
+        "summary": "Open the web browser to write the comment",
+        "status": "unsupported",
+        "reason": "Browser-driven pull request comments are not part of the supported pull request comment slice."
+      },
+      {
+        "name": "--yes",
+        "summary": "Skip the delete confirmation prompt when --delete-last is provided",
+        "status": "unsupported",
+        "reason": "Delete confirmation control is not part of the supported pull request comment slice."
+      }
+    ],
+    "prReviewOptions": [
+      {
+        "name": "--approve",
+        "aliases": [
+          "-a"
+        ],
+        "summary": "Approve pull request",
+        "status": "supported"
+      },
+      {
+        "name": "--body",
+        "aliases": [
+          "-b"
+        ],
+        "summary": "Specify the body of a review",
+        "status": "supported"
+      },
+      {
+        "name": "--body-file",
+        "aliases": [
+          "-F"
+        ],
+        "summary": "Read body text from file (use \"-\" to read from standard input)",
+        "status": "supported"
+      },
+      {
+        "name": "--comment",
+        "aliases": [
+          "-c"
+        ],
+        "summary": "Comment on a pull request",
+        "status": "supported"
+      },
+      {
+        "name": "--request-changes",
+        "aliases": [
+          "-r"
+        ],
+        "summary": "Request changes on a pull request",
+        "status": "supported"
+      }
+    ],
+    "prMergeOptions": [
+      {
+        "name": "--admin",
+        "summary": "Use administrator privileges to merge a pull request that does not meet requirements",
+        "status": "supported"
+      },
+      {
+        "name": "--body",
+        "aliases": [
+          "-b"
+        ],
+        "summary": "Body text for the merge commit",
+        "status": "supported"
+      },
+      {
+        "name": "--body-file",
+        "aliases": [
+          "-F"
+        ],
+        "summary": "Read body text from file (use \"-\" to read from standard input)",
+        "status": "supported"
+      },
+      {
+        "name": "--delete-branch",
+        "aliases": [
+          "-d"
+        ],
+        "summary": "Delete the local and remote branch after merge",
+        "status": "supported"
+      },
+      {
+        "name": "--match-head-commit",
+        "summary": "Commit SHA that the pull request head must match to allow merge",
+        "status": "supported"
+      },
+      {
+        "name": "--merge",
+        "aliases": [
+          "-m"
+        ],
+        "summary": "Merge the commits with the base branch",
+        "status": "supported"
+      },
+      {
+        "name": "--rebase",
+        "aliases": [
+          "-r"
+        ],
+        "summary": "Rebase the commits onto the base branch",
+        "status": "supported"
+      },
+      {
+        "name": "--squash",
+        "aliases": [
+          "-s"
+        ],
+        "summary": "Squash the commits into one commit and merge it into the base branch",
+        "status": "supported"
+      },
+      {
+        "name": "--subject",
+        "aliases": [
+          "-t"
+        ],
+        "summary": "Subject text for the merge commit",
+        "status": "supported"
+      }
+    ],
+    "prMergeUnsupportedOptions": [
+      {
+        "name": "--author-email",
+        "aliases": [
+          "-A"
+        ],
+        "summary": "Email text for merge commit author",
+        "status": "unsupported",
+        "reason": "Setting a custom merge author email is not part of the supported pull request merge slice."
+      },
+      {
+        "name": "--auto",
+        "summary": "Automatically merge only after necessary requirements are met",
+        "status": "unsupported",
+        "reason": "Auto-merge queue semantics are not part of the supported pull request merge slice."
+      },
+      {
+        "name": "--disable-auto",
+        "summary": "Disable auto-merge for this pull request",
+        "status": "unsupported",
+        "reason": "Disabling scheduled auto-merge is not part of the supported pull request merge slice."
+      }
+    ],
     "issueCreateUnsupportedOptions": [
       {
         "name": "--editor",
@@ -1227,40 +1586,43 @@
           "kind": "command",
           "name": "create",
           "summary": "Create a pull request",
-          "status": "unsupported",
-          "reason": "Pending the pull request write slice (#8).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "prRepositoryTarget",
+            "prCreateOptions",
+            "prCreateUnsupportedOptions"
           ]
         },
         {
           "kind": "command",
           "name": "comment",
           "summary": "Add a comment to a pull request",
-          "status": "unsupported",
-          "reason": "Pending the pull request write slice (#8).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "prRepositoryTarget",
+            "prCommentOptions",
+            "prCommentUnsupportedOptions"
           ]
         },
         {
           "kind": "command",
           "name": "review",
           "summary": "Submit a review on a pull request",
-          "status": "unsupported",
-          "reason": "Pending the pull request write slice (#8).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "prRepositoryTarget",
+            "prReviewOptions"
           ]
         },
         {
           "kind": "command",
           "name": "merge",
           "summary": "Merge a pull request",
-          "status": "unsupported",
-          "reason": "Pending the pull request write slice (#8).",
+          "status": "supported",
           "flagProfiles": [
-            "repositoryTarget"
+            "prRepositoryTarget",
+            "prMergeOptions",
+            "prMergeUnsupportedOptions"
           ]
         }
       ]

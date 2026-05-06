@@ -815,6 +815,44 @@ test("issue create help classifies supported, emulated, and unsupported flags", 
   assert.match(result.stdout, /--web, -w[\s\S]*\[unsupported\]/i);
 });
 
+test("pr create help classifies supported and unsupported write flags", async () => {
+  const result = await executeCli(["pr", "create", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--repo, -R[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--base, -B[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--body-file, -F[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--head, -H[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--draft, -d[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--reviewer, -r[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--web, -w[\s\S]*\[unsupported\]/i);
+});
+
+test("pr comment, review, and merge help classify the supported PR write slice", async () => {
+  const commentHelp = await executeCli(["pr", "comment", "--help"]);
+  const reviewHelp = await executeCli(["pr", "review", "--help"]);
+  const mergeHelp = await executeCli(["pr", "merge", "--help"]);
+
+  assert.equal(commentHelp.exitCode, 0);
+  assert.match(commentHelp.stdout, /--body, -b[\s\S]*\[supported\]/i);
+  assert.match(commentHelp.stdout, /--body-file, -F[\s\S]*\[supported\]/i);
+  assert.match(commentHelp.stdout, /--edit-last[\s\S]*\[unsupported\]/i);
+  assert.match(commentHelp.stdout, /--web, -w[\s\S]*\[unsupported\]/i);
+
+  assert.equal(reviewHelp.exitCode, 0);
+  assert.match(reviewHelp.stdout, /--approve, -a[\s\S]*\[supported\]/i);
+  assert.match(reviewHelp.stdout, /--comment, -c[\s\S]*\[supported\]/i);
+  assert.match(reviewHelp.stdout, /--request-changes, -r[\s\S]*\[supported\]/i);
+  assert.match(reviewHelp.stdout, /--body-file, -F[\s\S]*\[supported\]/i);
+
+  assert.equal(mergeHelp.exitCode, 0);
+  assert.match(mergeHelp.stdout, /--admin[\s\S]*\[supported\]/i);
+  assert.match(mergeHelp.stdout, /--squash, -s[\s\S]*\[supported\]/i);
+  assert.match(mergeHelp.stdout, /--delete-branch, -d[\s\S]*\[supported\]/i);
+  assert.match(mergeHelp.stdout, /--auto[\s\S]*\[unsupported\]/i);
+  assert.match(mergeHelp.stdout, /--author-email, -A[\s\S]*\[unsupported\]/i);
+});
+
 test("issue list help classifies supported and unsupported list flags", async () => {
   const result = await executeCli(["issue", "list", "--help"]);
 
@@ -2326,6 +2364,369 @@ test("pr status reports relevant open pull requests for the authenticated user",
       })
     );
   }
+});
+
+test("pr create posts a new pull request to the selected Gitea host", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token pr-create-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/pulls") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      base: "main",
+      head: "feature/pr-write",
+      title: "Ship the pull request write slice",
+      body: "Implement create first."
+    });
+
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        number: 18,
+        title: "Ship the pull request write slice",
+        state: "open",
+        base: {
+          ref: "main"
+        },
+        head: {
+          ref: "feature/pr-write"
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "create",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--base",
+      "main",
+      "--head",
+      "feature/pr-write",
+      "--title",
+      "Ship the pull request write slice",
+      "--body",
+      "Implement create first."
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, `http://127.0.0.1:${port}/octo/project/pulls/18\n`);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr comment posts a comment to the selected Gitea host", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token pr-comment-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/issues/18/comments") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      body: "Looks good from the CLI."
+    });
+
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(JSON.stringify({ id: 7, body: "Looks good from the CLI." }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "comment",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--body",
+      "Looks good from the CLI."
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-comment-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr review submits an approval review to the selected Gitea host", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token pr-review-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/pulls/18/reviews") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      event: "APPROVED",
+      body: "Approved from the CLI."
+    });
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ id: 4, state: "APPROVED" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "review",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--approve",
+      "--body",
+      "Approved from the CLI."
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-review-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr merge posts the selected merge method and merge options to the Gitea host", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token pr-merge-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/pulls/18/merge") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      do: "squash",
+      delete_branch_after_merge: true,
+      merge_title_field: "Ship the write slice",
+      merge_message_field: "Merge it from the CLI."
+    });
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({}));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "merge",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--squash",
+      "--delete-branch",
+      "--subject",
+      "Ship the write slice",
+      "--body",
+      "Merge it from the CLI."
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-merge-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr merge reports merge policy failures from the selected Gitea host", async () => {
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token pr-merge-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/pulls/18/merge") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(405, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "required checks are still pending" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "merge",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-merge-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "Merge blocked for pull request #18 in octo/project: required checks are still pending\n"
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr merge rejects unsupported auto-merge semantics explicitly", async () => {
+  const result = await executeCli([
+    "pr",
+    "merge",
+    "18",
+    "-R",
+    "https://example.com/octo/project",
+    "--auto"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "gtea pr merge flag --auto is currently unsupported: Auto-merge queue semantics are not part of the supported pull request merge slice.\n"
+  );
 });
 
 test("issue create posts a new issue to the selected Gitea host", async () => {
