@@ -1228,12 +1228,15 @@ function buildIssueUrl(repository: RepositoryContext, issueNumber: number): stri
   return `${buildHostBaseUrl(repository.hostname)}/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}`;
 }
 
-function isObjectValue(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
+function isPlainObjectValue(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function hasIssueNumber(payload: unknown): payload is GiteaIssuePayload & { number: number } {
-  return isObjectValue(payload) && typeof payload.number === "number";
+  return isPlainObjectValue(payload)
+    && typeof payload.number === "number"
+    && Number.isSafeInteger(payload.number)
+    && payload.number > 0;
 }
 
 function mapIssueUserRecord(payload?: GiteaUserPayload | null): IssueUserRecord | null {
@@ -1575,7 +1578,7 @@ async function readIssuePayload(
 
     const payload = await response.json() as unknown;
 
-    if (!isObjectValue(payload)) {
+    if (!isPlainObjectValue(payload)) {
       return {
         error: {
           exitCode: 1,
@@ -1658,7 +1661,7 @@ async function readIssueComments(
     }
 
     const comments = payload
-      .map((comment) => mapIssueCommentRecord(repository, issueNumber, isObjectValue(comment) ? comment as GiteaIssueCommentPayload : null))
+      .map((comment) => mapIssueCommentRecord(repository, issueNumber, isPlainObjectValue(comment) ? comment as GiteaIssueCommentPayload : null))
       .filter((comment): comment is IssueCommentRecord => comment !== null);
 
     return { comments };

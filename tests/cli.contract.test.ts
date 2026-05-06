@@ -1804,6 +1804,16 @@ test("issue list skips unusable entries and tolerates null nested records", asyn
           ]
         },
         {
+          number: 0,
+          title: "This entry should be skipped too",
+          state: "open"
+        },
+        {
+          number: 1.5,
+          title: "This fractional entry should be skipped",
+          state: "open"
+        },
+        {
           title: "This entry should be skipped",
           state: "open"
         }
@@ -2467,6 +2477,7 @@ test("issue view tolerates null nested records and null comment entries", async 
       response.writeHead(200, { "content-type": "application/json" });
       response.end(
         JSON.stringify([
+          [],
           null,
           {
             id: 900,
@@ -2558,6 +2569,48 @@ test("issue view tolerates null nested records and null comment entries", async 
       number: 42
     });
     assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue view rejects a non-object issue payload", async () => {
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues/42") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify([]));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "Gitea returned an invalid issue payload while reading issue #42.\n");
   } finally {
     await new Promise<void>((resolve, reject) =>
       server.close((error) => {
