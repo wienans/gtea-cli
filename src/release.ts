@@ -123,12 +123,64 @@ function collectSupportedReleaseOutputFields(commandName: string): Set<string> {
 const releaseListOutputFields = collectSupportedReleaseOutputFields("list");
 const releaseViewOutputFields = collectSupportedReleaseOutputFields("view");
 
+type UnsupportedReleaseValueFlag = {
+  long: string;
+  short?: string;
+  reason: string;
+  allowDashValue?: boolean;
+};
+
+type UnsupportedReleaseBooleanFlag = {
+  long: string;
+  short?: string;
+  reason: string;
+};
+
 function renderUnsupportedReleaseFlag(subcommand: string, flag: string, reason: string): CliResult {
   return {
     exitCode: 1,
     stdout: "",
     stderr: `${supportManifest.cliName} release ${subcommand} flag ${flag} is currently unsupported: ${reason}\n`
   };
+}
+
+function resolveUnsupportedReleaseValueFlag(
+  args: string[],
+  index: number,
+  subcommand: string,
+  unsupportedFlags: readonly UnsupportedReleaseValueFlag[]
+): CliResult | undefined {
+  for (const unsupportedFlag of unsupportedFlags) {
+    const parsedFlag = parseStringFlagValue(args, index, unsupportedFlag);
+
+    if (parsedFlag.error !== undefined) {
+      return parsedFlag.error;
+    }
+
+    if (parsedFlag.handled) {
+      return renderUnsupportedReleaseFlag(subcommand, unsupportedFlag.long, unsupportedFlag.reason);
+    }
+  }
+
+  return undefined;
+}
+
+function resolveUnsupportedReleaseBooleanFlag(
+  token: string,
+  subcommand: string,
+  unsupportedFlags: readonly UnsupportedReleaseBooleanFlag[]
+): CliResult | undefined {
+  for (const unsupportedFlag of unsupportedFlags) {
+    if (
+      token === unsupportedFlag.long
+      || token.startsWith(`${unsupportedFlag.long}=`)
+      || (unsupportedFlag.short !== undefined && token === unsupportedFlag.short)
+    ) {
+      return renderUnsupportedReleaseFlag(subcommand, unsupportedFlag.long, unsupportedFlag.reason);
+    }
+  }
+
+  return undefined;
 }
 
 function parseStringFlagValue(
@@ -381,7 +433,7 @@ function parseReleaseCreateFlags(args: string[]): { flags: ParsedReleaseCreateFl
       continue;
     }
 
-    const unsupportedValueFlags = [
+    const unsupportedValueFlags: UnsupportedReleaseValueFlag[] = [
       {
         long: "--discussion-category",
         reason: "Discussion creation is not part of the supported release create slice."
@@ -392,25 +444,16 @@ function parseReleaseCreateFlags(args: string[]): { flags: ParsedReleaseCreateFl
       }
     ] as const;
 
-    for (const unsupportedFlag of unsupportedValueFlags) {
-      const unsupportedValueFlag = parseStringFlagValue(args, index, unsupportedFlag);
+    const unsupportedValueError = resolveUnsupportedReleaseValueFlag(args, index, "create", unsupportedValueFlags);
 
-      if (unsupportedValueFlag.error !== undefined) {
-        return {
-          flags,
-          error: unsupportedValueFlag.error
-        };
-      }
-
-      if (unsupportedValueFlag.handled) {
-        return {
-          flags,
-          error: renderUnsupportedReleaseFlag("create", unsupportedFlag.long, unsupportedFlag.reason)
-        };
-      }
+    if (unsupportedValueError !== undefined) {
+      return {
+        flags,
+        error: unsupportedValueError
+      };
     }
 
-    const unsupportedBooleanFlags: Array<{ long: string; reason: string }> = [
+    const unsupportedBooleanFlags: UnsupportedReleaseBooleanFlag[] = [
       {
         long: "--fail-on-no-commits",
         reason: "Commit-gap validation is not part of the supported release create slice."
@@ -433,13 +476,13 @@ function parseReleaseCreateFlags(args: string[]): { flags: ParsedReleaseCreateFl
       }
     ];
 
-    for (const unsupportedFlag of unsupportedBooleanFlags) {
-      if (token === unsupportedFlag.long || token.startsWith(`${unsupportedFlag.long}=`)) {
-        return {
-          flags,
-          error: renderUnsupportedReleaseFlag("create", unsupportedFlag.long, unsupportedFlag.reason)
-        };
-      }
+    const unsupportedBooleanError = resolveUnsupportedReleaseBooleanFlag(token, "create", unsupportedBooleanFlags);
+
+    if (unsupportedBooleanError !== undefined) {
+      return {
+        flags,
+        error: unsupportedBooleanError
+      };
     }
 
     const titleFlag = parseStringFlagValue(args, index, { long: "--title", short: "-t" });
@@ -566,32 +609,23 @@ function parseReleaseEditFlags(args: string[]): { flags: ParsedReleaseEditFlags;
       continue;
     }
 
-    const unsupportedValueFlags = [
+    const unsupportedValueFlags: UnsupportedReleaseValueFlag[] = [
       {
         long: "--discussion-category",
         reason: "Discussion creation while publishing a draft is not part of the supported release edit slice."
       }
-    ] as const;
+    ];
 
-    for (const unsupportedFlag of unsupportedValueFlags) {
-      const unsupportedValueFlag = parseStringFlagValue(args, index, unsupportedFlag);
+    const unsupportedValueError = resolveUnsupportedReleaseValueFlag(args, index, "edit", unsupportedValueFlags);
 
-      if (unsupportedValueFlag.error !== undefined) {
-        return {
-          flags,
-          error: unsupportedValueFlag.error
-        };
-      }
-
-      if (unsupportedValueFlag.handled) {
-        return {
-          flags,
-          error: renderUnsupportedReleaseFlag("edit", unsupportedFlag.long, unsupportedFlag.reason)
-        };
-      }
+    if (unsupportedValueError !== undefined) {
+      return {
+        flags,
+        error: unsupportedValueError
+      };
     }
 
-    const unsupportedBooleanFlags: Array<{ long: string; reason: string }> = [
+    const unsupportedBooleanFlags: UnsupportedReleaseBooleanFlag[] = [
       {
         long: "--latest",
         reason: "Explicit latest-release promotion is not part of the supported release edit slice."
@@ -602,13 +636,13 @@ function parseReleaseEditFlags(args: string[]): { flags: ParsedReleaseEditFlags;
       }
     ];
 
-    for (const unsupportedFlag of unsupportedBooleanFlags) {
-      if (token === unsupportedFlag.long || token.startsWith(`${unsupportedFlag.long}=`)) {
-        return {
-          flags,
-          error: renderUnsupportedReleaseFlag("edit", unsupportedFlag.long, unsupportedFlag.reason)
-        };
-      }
+    const unsupportedBooleanError = resolveUnsupportedReleaseBooleanFlag(token, "edit", unsupportedBooleanFlags);
+
+    if (unsupportedBooleanError !== undefined) {
+      return {
+        flags,
+        error: unsupportedBooleanError
+      };
     }
 
     const titleFlag = parseStringFlagValue(args, index, { long: "--title", short: "-t" });
@@ -934,7 +968,7 @@ function parseReleaseDownloadFlags(args: string[]): { flags: ParsedReleaseDownlo
       continue;
     }
 
-    const unsupportedValueFlags = [
+    const unsupportedValueFlags: UnsupportedReleaseValueFlag[] = [
       {
         long: "--archive",
         short: "-A",
@@ -945,27 +979,18 @@ function parseReleaseDownloadFlags(args: string[]): { flags: ParsedReleaseDownlo
         short: "-O",
         reason: "Redirecting a single asset to a custom output file is not part of the supported release asset slice."
       }
-    ] as const;
+    ];
 
-    for (const unsupportedFlag of unsupportedValueFlags) {
-      const unsupportedValueFlag = parseStringFlagValue(args, index, unsupportedFlag);
+    const unsupportedValueError = resolveUnsupportedReleaseValueFlag(args, index, "download", unsupportedValueFlags);
 
-      if (unsupportedValueFlag.error !== undefined) {
-        return {
-          flags,
-          error: unsupportedValueFlag.error
-        };
-      }
-
-      if (unsupportedValueFlag.handled) {
-        return {
-          flags,
-          error: renderUnsupportedReleaseFlag("download", unsupportedFlag.long, unsupportedFlag.reason)
-        };
-      }
+    if (unsupportedValueError !== undefined) {
+      return {
+        flags,
+        error: unsupportedValueError
+      };
     }
 
-    const unsupportedBooleanFlags: Array<{ long: string; reason: string }> = [
+    const unsupportedBooleanFlags: UnsupportedReleaseBooleanFlag[] = [
       {
         long: "--clobber",
         reason: "Overwriting existing files during download is not part of the supported release asset slice."
@@ -976,13 +1001,13 @@ function parseReleaseDownloadFlags(args: string[]): { flags: ParsedReleaseDownlo
       }
     ];
 
-    for (const unsupportedFlag of unsupportedBooleanFlags) {
-      if (token === unsupportedFlag.long || token.startsWith(`${unsupportedFlag.long}=`)) {
-        return {
-          flags,
-          error: renderUnsupportedReleaseFlag("download", unsupportedFlag.long, unsupportedFlag.reason)
-        };
-      }
+    const unsupportedBooleanError = resolveUnsupportedReleaseBooleanFlag(token, "download", unsupportedBooleanFlags);
+
+    if (unsupportedBooleanError !== undefined) {
+      return {
+        flags,
+        error: unsupportedBooleanError
+      };
     }
 
     if (token.startsWith("-")) {
