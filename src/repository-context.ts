@@ -35,6 +35,13 @@ function parseRepositoryTarget(rawRepository: string, context: ResolvedCliExecut
   }
 
   const config = loadNativeAuthConfig(context);
+
+  if (config.error !== undefined) {
+    return {
+      error: config.error
+    };
+  }
+
   const repository = segments.at(-1);
   const owner = segments.at(-2);
   const explicitHostSegments = segments.slice(0, -2);
@@ -186,13 +193,33 @@ export function resolveRepositoryContext(
   return resolveRepositoryFromGit(context);
 }
 
-export function resolveOptionalToken(hostname: string, context: ResolvedCliExecutionContext): string | undefined {
-  const nativeConfig = loadNativeAuthConfig(context);
+export function resolveOptionalTokenResult(
+  hostname: string,
+  context: ResolvedCliExecutionContext
+): { token?: string; error?: CliResult } {
   const envHost = parseHostname(context.env.GTEA_HOST) ?? parseHostname(context.env.GH_HOST);
 
   if (envHost === hostname) {
-    return context.env.GTEA_TOKEN ?? context.env.GH_TOKEN;
+    const envToken = context.env.GTEA_TOKEN ?? context.env.GH_TOKEN;
+
+    return {
+      ...(envToken === undefined ? {} : { token: envToken })
+    };
   }
 
-  return nativeConfig.hosts[hostname]?.token;
+  const nativeConfig = loadNativeAuthConfig(context);
+
+  if (nativeConfig.error !== undefined) {
+    return {
+      error: nativeConfig.error
+    };
+  }
+
+  return {
+    ...(nativeConfig.hosts[hostname]?.token === undefined ? {} : { token: nativeConfig.hosts[hostname]?.token })
+  };
+}
+
+export function resolveOptionalToken(hostname: string, context: ResolvedCliExecutionContext): string | undefined {
+  return resolveOptionalTokenResult(hostname, context).token;
 }

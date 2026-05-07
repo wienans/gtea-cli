@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import { buildHostBaseUrl, buildProcessEnv, isEligibleHost, loadNativeAuthConfig, parseHostname } from "./host-config.js";
-import { type RepositoryContext, resolveOptionalToken, resolveRepositoryContext } from "./repository-context.js";
+import { type RepositoryContext, resolveOptionalToken, resolveOptionalTokenResult, resolveRepositoryContext } from "./repository-context.js";
 import { renderStructuredJq, renderStructuredJson, renderStructuredTemplate, type StructuredObject } from "./structured-output.js";
 import { ManifestCommand, ManifestGroup, supportManifest } from "./support-manifest.js";
 
@@ -691,6 +691,13 @@ function parseRepoCreateName(rawName: string): { owner?: string; repository?: st
 
 function resolveSelectedRepoHost(context: ResolvedCliExecutionContext): { hostname?: string; error?: CliResult } {
   const config = loadNativeAuthConfig(context);
+
+  if (config.error !== undefined) {
+    return {
+      error: config.error
+    };
+  }
+
   const envHost = parseHostname(context.env.GTEA_HOST) ?? parseHostname(context.env.GH_HOST);
   const hostname = envHost ?? config.activeHost ?? Object.keys(config.hosts).sort()[0];
 
@@ -722,7 +729,15 @@ function resolveRequiredRepoToken(
   subcommand: "create" | "rename" | "fork",
   context: ResolvedCliExecutionContext
 ): { token: string } | { error: CliResult } {
-  const token = resolveOptionalToken(hostname, context);
+  const tokenResult = resolveOptionalTokenResult(hostname, context);
+
+  if (tokenResult.error !== undefined) {
+    return {
+      error: tokenResult.error
+    };
+  }
+
+  const token = tokenResult.token;
 
   if (token === undefined) {
     return {
