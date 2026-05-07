@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { ResolvedCliExecutionContext } from "./cli-runtime.js";
+import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 
 export interface StoredHostCredential {
   token: string;
@@ -12,10 +12,31 @@ export interface StoredHostCredential {
 export interface NativeAuthConfig {
   activeHost?: string;
   hosts: Record<string, StoredHostCredential>;
+  error?: CliResult;
 }
 
 const explicitSchemePattern = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//;
 const supportedHostProtocols = new Set(["http:", "https:"]);
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error && error.message.length > 0) {
+    return error.message;
+  }
+
+  return "unknown error";
+}
+
+function createNativeAuthConfigReadError(configPath: string, error: unknown): CliResult {
+  return {
+    exitCode: 1,
+    stdout: "",
+    stderr: `Could not read the native auth config at ${configPath}: ${describeError(error)}\n`
+  };
+}
 
 function resolveConfigDirectory(context: ResolvedCliExecutionContext): string {
   const env = context.env;
@@ -38,32 +59,80 @@ function resolveConfigPath(context: ResolvedCliExecutionContext): string {
 
 export function loadNativeAuthConfig(context: ResolvedCliExecutionContext): NativeAuthConfig {
   const configPath = resolveConfigPath(context);
+  let content = "";
 
   try {
-    const content = readFileSync(configPath, "utf8");
-    const parsed = JSON.parse(content) as Partial<NativeAuthConfig>;
-
-    const config: NativeAuthConfig = {
-      hosts: parsed.hosts ?? {}
-    };
-
-    if (parsed.activeHost !== undefined) {
-      config.activeHost = parsed.activeHost;
+    content = readFileSync(configPath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        hosts: {}
+      };
     }
 
-    return config;
-  } catch {
     return {
+      hosts: {},
+      error: createNativeAuthConfigReadError(configPath, error)
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(content) as unknown;
+
+    if (!isObjectRecord(parsed)) {
+      throw new Error("config root must be a JSON object");
+    }
+
+    const hostsValue = parsed.hosts;
+
+    if (hostsValue !== undefined && !isObjectRecord(hostsValue)) {
+      throw new Error("hosts must be a JSON object");
+    }
+
+    const config: NativeAuthConfig = {
       hosts: {}
+    };
+
+    for (const [hostname, credentialValue] of Object.entries(hostsValue ?? {})) {
+      if (!isObjectRecord(credentialValue) || typeof credentialValue.token !== "string") {
+        throw new Error(`hosts.${hostname} must include a string token`);
+      }
+
+      config.hosts[hostname] = {
+        token: credentialValue.token,
+        tokenStorage: "native-config-store"
+      };
+    }
+
+    if (parsed.activeHost !== undefined) {
+      if (typeof parsed.activeHost !== "string" || parsed.activeHost.trim().length === 0) {
+        throw new Error("activeHost must be a non-empty string when present");
+      }
+
+      config.activeHost = parsed.activeHost;
+    };
+
+    return config;
+  } catch (error) {
+    return {
+      hosts: {},
+      error: createNativeAuthConfigReadError(configPath, error)
     };
   }
 }
 
 export function saveNativeAuthConfig(config: NativeAuthConfig, context: ResolvedCliExecutionContext): void {
   const configPath = resolveConfigPath(context);
+  const persistedConfig: NativeAuthConfig = {
+    hosts: config.hosts
+  };
+
+  if (config.activeHost !== undefined) {
+    persistedConfig.activeHost = config.activeHost;
+  }
 
   mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeFileSync(configPath, `${JSON.stringify(persistedConfig, null, 2)}\n`, "utf8");
 }
 
 export function parseHostname(rawValue: string | undefined): string | undefined {

@@ -299,6 +299,20 @@ function resolveRequestedToken(flags: ParsedAuthFlags, context: ResolvedCliExecu
   return flags.withToken ? readTokenFromStdin(context) : resolveEnvToken(context)?.token;
 }
 
+function loadAuthConfig(context: ResolvedCliExecutionContext): { config?: NativeAuthConfig; error?: CliResult } {
+  const config = loadNativeAuthConfig(context);
+
+  if (config.error !== undefined) {
+    return {
+      error: config.error
+    };
+  }
+
+  return {
+    config
+  };
+}
+
 function handleAuthLogin(args: string[], context: ResolvedCliExecutionContext): CliResult {
   const parsedFlags = parseAuthFlags(args);
 
@@ -306,7 +320,17 @@ function handleAuthLogin(args: string[], context: ResolvedCliExecutionContext): 
     return parsedFlags.error;
   }
 
-  const config = loadNativeAuthConfig(context);
+  const configResult = loadAuthConfig(context);
+
+  if (configResult.error !== undefined || configResult.config === undefined) {
+    return configResult.error ?? {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Could not read the native auth config.\n"
+    };
+  }
+
+  const config = configResult.config;
   const selectedHostResult = resolveSelectedHost(parsedFlags.flags.hostname, context, config);
 
   if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
@@ -349,7 +373,17 @@ function handleAuthRefresh(args: string[], context: ResolvedCliExecutionContext)
     return parsedFlags.error;
   }
 
-  const config = loadNativeAuthConfig(context);
+  const configResult = loadAuthConfig(context);
+
+  if (configResult.error !== undefined || configResult.config === undefined) {
+    return configResult.error ?? {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Could not read the native auth config.\n"
+    };
+  }
+
+  const config = configResult.config;
   const selectedHostResult = resolveSelectedHost(parsedFlags.flags.hostname, context, config);
 
   if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
@@ -400,7 +434,17 @@ function handleAuthSetupGit(args: string[], context: ResolvedCliExecutionContext
     return parsedFlags.error;
   }
 
-  const config = loadNativeAuthConfig(context);
+  const configResult = loadAuthConfig(context);
+
+  if (configResult.error !== undefined || configResult.config === undefined) {
+    return configResult.error ?? {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Could not read the native auth config.\n"
+    };
+  }
+
+  const config = configResult.config;
   const credentialResult = resolveCredential(parsedFlags.flags.hostname, context, config);
 
   if (credentialResult.error !== undefined || credentialResult.credential === undefined) {
@@ -485,7 +529,17 @@ function handleAuthGitCredential(args: string[], context: ResolvedCliExecutionCo
   }
 
   const gitCredentialInput = parseGitCredentialInput(context.stdin);
-  const config = loadNativeAuthConfig(context);
+  const configResult = loadAuthConfig(context);
+
+  if (configResult.error !== undefined || configResult.config === undefined) {
+    return configResult.error ?? {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Could not read the native auth config.\n"
+    };
+  }
+
+  const config = configResult.config;
   const credentialHost = parsedFlags.flags.hostname ?? gitCredentialInput.host;
   const credentialHostSource = parsedFlags.flags.hostname !== undefined ? "--hostname" : "git credential input host";
   const credentialResult = resolveCredential(credentialHost, context, config, credentialHostSource);
@@ -512,7 +566,17 @@ function handleAuthStatus(args: string[], context: ResolvedCliExecutionContext):
     return parsedFlags.error;
   }
 
-  const config = loadNativeAuthConfig(context);
+  const configResult = loadAuthConfig(context);
+
+  if (configResult.error !== undefined || configResult.config === undefined) {
+    return configResult.error ?? {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Could not read the native auth config.\n"
+    };
+  }
+
+  const config = configResult.config;
   const credentialResult = resolveCredential(parsedFlags.flags.hostname, context, config);
 
   if (credentialResult.error !== undefined || credentialResult.credential === undefined) {
@@ -546,7 +610,17 @@ function handleAuthToken(args: string[], context: ResolvedCliExecutionContext): 
     return parsedFlags.error;
   }
 
-  const config = loadNativeAuthConfig(context);
+  const configResult = loadAuthConfig(context);
+
+  if (configResult.error !== undefined || configResult.config === undefined) {
+    return configResult.error ?? {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Could not read the native auth config.\n"
+    };
+  }
+
+  const config = configResult.config;
   const credentialResult = resolveCredential(parsedFlags.flags.hostname, context, config);
 
   if (credentialResult.error !== undefined || credentialResult.credential === undefined) {
@@ -571,7 +645,17 @@ function handleAuthSwitch(args: string[], context: ResolvedCliExecutionContext):
     return parsedFlags.error;
   }
 
-  const config = loadNativeAuthConfig(context);
+  const configResult = loadAuthConfig(context);
+
+  if (configResult.error !== undefined || configResult.config === undefined) {
+    return configResult.error ?? {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Could not read the native auth config.\n"
+    };
+  }
+
+  const config = configResult.config;
   const selectedHostResult = resolveSelectedHost(parsedFlags.flags.hostname, context, config);
 
   if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
@@ -607,7 +691,17 @@ function handleAuthLogout(args: string[], context: ResolvedCliExecutionContext):
     return parsedFlags.error;
   }
 
-  const config = loadNativeAuthConfig(context);
+  const configResult = loadAuthConfig(context);
+
+  if (configResult.error !== undefined || configResult.config === undefined) {
+    return configResult.error ?? {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Could not read the native auth config.\n"
+    };
+  }
+
+  const config = configResult.config;
   const selectedHostResult = resolveSelectedHost(parsedFlags.flags.hostname, context, config);
 
   if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
