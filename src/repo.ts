@@ -2,7 +2,14 @@ import { spawnSync } from "node:child_process";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import { buildHostBaseUrl, buildProcessEnv, isEligibleHost, loadNativeAuthConfig, parseHostname } from "./host-config.js";
-import { type RepositoryContext, resolveOptionalToken, resolveOptionalTokenResult, resolveRepositoryContext } from "./repository-context.js";
+import {
+  buildAuthorizationHeaders,
+  preferOptionalTokenError,
+  type RepositoryContext,
+  resolveOptionalTokenResult,
+  resolveRequiredTokenResult,
+  resolveRepositoryContext
+} from "./repository-context.js";
 import { renderStructuredJq, renderStructuredJson, renderStructuredTemplate, type StructuredObject } from "./structured-output.js";
 import { ManifestCommand, ManifestGroup, supportManifest } from "./support-manifest.js";
 
@@ -729,27 +736,11 @@ function resolveRequiredRepoToken(
   subcommand: "create" | "rename" | "fork",
   context: ResolvedCliExecutionContext
 ): { token: string } | { error: CliResult } {
-  const tokenResult = resolveOptionalTokenResult(hostname, context);
-
-  if (tokenResult.error !== undefined) {
-    return {
-      error: tokenResult.error
-    };
-  }
-
-  const token = tokenResult.token;
-
-  if (token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `gtea repo ${subcommand} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
-      }
-    };
-  }
-
-  return { token };
+  return resolveRequiredTokenResult(hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: `gtea repo ${subcommand} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
+  });
 }
 
 async function readGiteaErrorMessage(response: Response): Promise<string | undefined> {
@@ -1152,31 +1143,29 @@ async function readRepositoryPayload(
   context: ResolvedCliExecutionContext
 ): Promise<{ payload?: GiteaRepositoryPayload; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (response.status === 404) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Repository ${repository.owner}/${repository.repository} was not found on ${repository.hostname}.\n`
-        }
+        })
       };
     }
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading repository ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
@@ -1226,21 +1215,19 @@ async function readRepositoryList(
   context: ResolvedCliExecutionContext
 ): Promise<{ repos?: RepositoryRecord[]; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/users/${encodeURIComponent(repository.owner)}/repos`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while listing repositories for ${repository.owner}.\n`
-        }
+        })
       };
     }
 

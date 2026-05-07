@@ -3,7 +3,14 @@ import { basename, resolve as resolvePath } from "node:path";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import { buildHostBaseUrl } from "./host-config.js";
-import { type RepositoryContext, resolveOptionalToken, resolveRepositoryContext } from "./repository-context.js";
+import {
+  buildAuthorizationHeaders,
+  preferOptionalTokenError,
+  type RepositoryContext,
+  resolveOptionalTokenResult,
+  resolveRepositoryContext,
+  resolveRequiredTokenResult
+} from "./repository-context.js";
 import {
   renderStructuredJq,
   renderStructuredJson,
@@ -1175,31 +1182,29 @@ async function readReleasePayload(
   notFoundMessage: string,
   context: ResolvedCliExecutionContext
 ): Promise<{ payload?: GiteaReleasePayload; error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (response.status === 404) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `${notFoundMessage}\n`
-        }
+        })
       };
     }
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading releases for ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
@@ -1224,21 +1229,19 @@ async function readReleaseList(
   context: ResolvedCliExecutionContext
 ): Promise<{ releases?: ReleaseRecord[]; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/releases`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading releases for ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
@@ -1336,14 +1339,20 @@ async function createRelease(
   context: ResolvedCliExecutionContext
 ): Promise<{ release?: ReleaseRecord; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/releases`;
-  const token = resolveOptionalToken(repository.hostname, context);
-  const headers: Record<string, string> = {
-    "content-type": "application/json"
-  };
+  const tokenResult = resolveRequiredTokenResult(repository.hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: "gtea release create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+  });
 
-  if (token !== undefined) {
-    headers.Authorization = `token ${token}`;
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    Authorization: `token ${tokenResult.token}`
+  };
 
   const requestBody = {
     tag_name: input.tagName,
@@ -1433,14 +1442,20 @@ async function editRelease(
   context: ResolvedCliExecutionContext
 ): Promise<{ release?: ReleaseRecord; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/releases/${releaseId}`;
-  const token = resolveOptionalToken(repository.hostname, context);
-  const headers: Record<string, string> = {
-    "content-type": "application/json"
-  };
+  const tokenResult = resolveRequiredTokenResult(repository.hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: "gtea release edit requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+  });
 
-  if (token !== undefined) {
-    headers.Authorization = `token ${token}`;
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    Authorization: `token ${tokenResult.token}`
+  };
 
   const requestBody = {
     ...(input.title === undefined ? {} : { name: input.title }),
@@ -1490,13 +1505,22 @@ async function deleteRelease(
   context: ResolvedCliExecutionContext
 ): Promise<{ error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/releases/${releaseId}`;
-  const token = resolveOptionalToken(repository.hostname, context);
-  const headers = token === undefined ? undefined : { Authorization: `token ${token}` };
+  const tokenResult = resolveRequiredTokenResult(repository.hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: "gtea release delete requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+  });
+
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
+  }
+
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
     const response = await fetch(requestUrl, {
       method: "DELETE",
-      ...(headers === undefined ? {} : { headers })
+      headers
     });
 
     if (!response.ok) {
@@ -1531,14 +1555,20 @@ async function uploadReleaseAsset(
 ): Promise<{ error?: CliResult }> {
   const resolvedFilePath = resolvePath(context.cwd, filePath);
   const assetName = basename(resolvedFilePath);
-  const token = resolveOptionalToken(repository.hostname, context);
-  const headers: Record<string, string> = {
-    "content-type": "application/octet-stream"
-  };
+  const tokenResult = resolveRequiredTokenResult(repository.hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: "gtea release upload requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
+  });
 
-  if (token !== undefined) {
-    headers.Authorization = `token ${token}`;
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
+
+  const headers: Record<string, string> = {
+    "content-type": "application/octet-stream",
+    Authorization: `token ${tokenResult.token}`
+  };
 
   let assetContent: Buffer;
 
@@ -1612,19 +1642,19 @@ async function downloadReleaseAsset(
   repository: RepositoryContext,
   context: ResolvedCliExecutionContext
 ): Promise<{ error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
-  const headers = token === undefined ? undefined : { Authorization: `token ${token}` };
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
     const response = await fetch(asset.downloadUrl, headers === undefined ? undefined : { headers });
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while downloading release asset ${asset.name}.\n`
-        }
+        })
       };
     }
 

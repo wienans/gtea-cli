@@ -4,7 +4,14 @@ import { resolve as resolvePath } from "node:path";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import { buildHostBaseUrl, buildProcessEnv } from "./host-config.js";
-import { type RepositoryContext, resolveOptionalToken, resolveRepositoryContext } from "./repository-context.js";
+import {
+  buildAuthorizationHeaders,
+  preferOptionalTokenError,
+  type RepositoryContext,
+  resolveOptionalTokenResult,
+  resolveRepositoryContext,
+  resolveRequiredTokenResult
+} from "./repository-context.js";
 import {
   renderStructuredJq,
   renderStructuredJson,
@@ -1036,21 +1043,27 @@ async function readGiteaErrorMessage(response: Response): Promise<string | undef
   }
 }
 
+function resolveRequiredPullRequestToken(
+  hostname: string,
+  context: ResolvedCliExecutionContext,
+  commandName: string
+): { token: string } | { error: CliResult } {
+  return resolveRequiredTokenResult(hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: `gtea pr ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
+  });
+}
+
 async function createPullRequest(
   repository: RepositoryContext,
   flags: { title: string; base: string; head: string; body?: string },
   context: ResolvedCliExecutionContext
 ): Promise<{ pullRequest?: PullRequestRecord; error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "create");
 
-  if (token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls`;
@@ -1062,7 +1075,7 @@ async function createPullRequest(
     const response = await fetch(requestUrl, {
       method: "POST",
       headers: {
-        Authorization: `token ${token}`,
+        Authorization: `token ${tokenResult.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify(requestBody)
@@ -1124,16 +1137,10 @@ async function commentOnPullRequest(
   body: string,
   context: ResolvedCliExecutionContext
 ): Promise<{ error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "comment");
 
-  if (token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr comment requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${pullRequestNumber}/comments`;
@@ -1142,7 +1149,7 @@ async function commentOnPullRequest(
     const response = await fetch(requestUrl, {
       method: "POST",
       headers: {
-        Authorization: `token ${token}`,
+        Authorization: `token ${tokenResult.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify({ body })
@@ -1212,16 +1219,10 @@ async function reviewPullRequest(
   review: { event: PullRequestReviewEvent; body?: string },
   context: ResolvedCliExecutionContext
 ): Promise<{ error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "review");
 
-  if (token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr review requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}/reviews`;
@@ -1233,7 +1234,7 @@ async function reviewPullRequest(
     const response = await fetch(requestUrl, {
       method: "POST",
       headers: {
-        Authorization: `token ${token}`,
+        Authorization: `token ${tokenResult.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify(requestBody)
@@ -1310,16 +1311,10 @@ async function mergePullRequest(
   },
   context: ResolvedCliExecutionContext
 ): Promise<{ error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "merge");
 
-  if (token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr merge requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}/merge`;
@@ -1351,7 +1346,7 @@ async function mergePullRequest(
     const response = await fetch(requestUrl, {
       method: "POST",
       headers: {
-        Authorization: `token ${token}`,
+        Authorization: `token ${tokenResult.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify(requestBody)
@@ -1435,31 +1430,29 @@ async function readPullRequest(
   context: ResolvedCliExecutionContext
 ): Promise<{ pullRequest?: PullRequestRecord; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (response.status === 404) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Pull request #${pullRequestNumber} was not found in ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading pull request #${pullRequestNumber}.\n`
-        }
+        })
       };
     }
 
@@ -1485,31 +1478,29 @@ async function readPullRequestDiff(
   context: ResolvedCliExecutionContext
 ): Promise<{ diff?: string; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}.diff`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (response.status === 404) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Pull request #${pullRequestNumber} was not found in ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading pull request diff #${pullRequestNumber}.\n`
-        }
+        })
       };
     }
 
@@ -1609,21 +1600,19 @@ async function readPullRequestList(
   context: ResolvedCliExecutionContext
 ): Promise<{ pullRequests?: PullRequestRecord[]; payload?: GiteaPullRequestPayload[]; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls?state=open`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading pull requests for ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
@@ -1647,22 +1636,16 @@ async function readPullRequestList(
 }
 
 async function readCurrentUser(hostname: string, context: ResolvedCliExecutionContext): Promise<{ login?: string; error?: CliResult }> {
-  const token = resolveOptionalToken(hostname, context);
+  const tokenResult = resolveRequiredPullRequestToken(hostname, context, "status");
 
-  if (token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr status requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   try {
     const response = await fetch(`${buildHostBaseUrl(hostname)}/api/v1/user`, {
       headers: {
-        Authorization: `token ${token}`
+        Authorization: `token ${tokenResult.token}`
       }
     });
 
