@@ -74,29 +74,23 @@ function resolveEnvironmentHost(
   context: ResolvedCliExecutionContext,
   options: { strict: boolean }
 ): HostResolutionResult {
-  if (options.strict) {
-    if (context.env.GTEA_HOST !== undefined) {
-      return parseProvidedHostname(context.env.GTEA_HOST, "GTEA_HOST");
-    }
+  if (context.env.GTEA_HOST !== undefined) {
+    const resolvedHost = parseProvidedHostname(context.env.GTEA_HOST, "GTEA_HOST");
 
-    if (context.env.GH_HOST !== undefined) {
-      return parseProvidedHostname(context.env.GH_HOST, "GH_HOST");
+    if (resolvedHost.hostname !== undefined || options.strict) {
+      return resolvedHost;
     }
-
-    return {};
   }
 
-  return {
-    ...(parseHostname(context.env.GTEA_HOST) ?? parseHostname(context.env.GH_HOST)) as string | undefined extends never ? {} : {}
-  };
-}
+  if (context.env.GH_HOST !== undefined) {
+    const resolvedHost = parseProvidedHostname(context.env.GH_HOST, "GH_HOST");
 
-function resolveLenientEnvironmentHost(context: ResolvedCliExecutionContext): HostResolutionResult {
-  const hostname = parseHostname(context.env.GTEA_HOST) ?? parseHostname(context.env.GH_HOST);
+    if (resolvedHost.hostname !== undefined || options.strict) {
+      return resolvedHost;
+    }
+  }
 
-  return {
-    ...(hostname === undefined ? {} : { hostname })
-  };
+  return {};
 }
 
 function resolveStoredHost(config: NativeAuthConfig): string | undefined {
@@ -235,9 +229,9 @@ function resolveSelectedHostForCommand(
   let hostname = explicitHost.hostname;
 
   if (hostname === undefined) {
-    const environmentHost = options.strictEnvironmentHost
-      ? resolveEnvironmentHost(context, { strict: true })
-      : resolveLenientEnvironmentHost(context);
+    const environmentHost = resolveEnvironmentHost(context, {
+      strict: options.strictEnvironmentHost
+    });
 
     if (environmentHost.error !== undefined) {
       return {
