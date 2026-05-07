@@ -1345,14 +1345,8 @@ async function createRelease(
     stderr: "gtea release create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
   });
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea release create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const headers: Record<string, string> = {
@@ -1454,14 +1448,8 @@ async function editRelease(
     stderr: "gtea release edit requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
   });
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea release edit requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const headers: Record<string, string> = {
@@ -1523,14 +1511,8 @@ async function deleteRelease(
     stderr: "gtea release delete requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
   });
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea release delete requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const headers = buildAuthorizationHeaders(tokenResult.token);
@@ -1579,14 +1561,8 @@ async function uploadReleaseAsset(
     stderr: "gtea release upload requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
   });
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea release upload requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const headers: Record<string, string> = {

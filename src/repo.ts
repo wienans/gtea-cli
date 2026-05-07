@@ -7,6 +7,7 @@ import {
   preferOptionalTokenError,
   type RepositoryContext,
   resolveOptionalTokenResult,
+  resolveRequiredTokenResult,
   resolveRepositoryContext
 } from "./repository-context.js";
 import { renderStructuredJq, renderStructuredJson, renderStructuredTemplate, type StructuredObject } from "./structured-output.js";
@@ -735,27 +736,11 @@ function resolveRequiredRepoToken(
   subcommand: "create" | "rename" | "fork",
   context: ResolvedCliExecutionContext
 ): { token: string } | { error: CliResult } {
-  const tokenResult = resolveOptionalTokenResult(hostname, context);
-
-  if (tokenResult.error !== undefined) {
-    return {
-      error: tokenResult.error
-    };
-  }
-
-  const token = tokenResult.token;
-
-  if (token === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `gtea repo ${subcommand} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
-      }
-    };
-  }
-
-  return { token };
+  return resolveRequiredTokenResult(hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: `gtea repo ${subcommand} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
+  });
 }
 
 async function readGiteaErrorMessage(response: Response): Promise<string | undefined> {

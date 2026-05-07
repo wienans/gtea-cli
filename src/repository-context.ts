@@ -20,6 +20,8 @@ export interface ResolvedTokenResult {
   error?: CliResult;
 }
 
+type RequiredTokenResult = { token: string } | { error: CliResult };
+
 function resolveSelectedHost(context: ResolvedCliExecutionContext, config: NativeAuthConfig): string | undefined {
   const envHost = parseHostname(context.env.GTEA_HOST) ?? parseHostname(context.env.GH_HOST);
 
@@ -233,7 +235,7 @@ export function resolveRequiredTokenResult(
   hostname: string,
   context: ResolvedCliExecutionContext,
   missingCredentialError: CliResult
-): ResolvedTokenResult {
+): RequiredTokenResult {
   const tokenResult = resolveOptionalTokenResult(hostname, context);
 
   if (tokenResult.error !== undefined) {
@@ -248,17 +250,16 @@ export function resolveRequiredTokenResult(
     };
   }
 
-  return tokenResult;
+  return { token: tokenResult.token };
 }
 
+export function buildAuthorizationHeaders(token: string): Record<string, string>;
+export function buildAuthorizationHeaders(token: undefined): undefined;
+export function buildAuthorizationHeaders(token: string | undefined): Record<string, string> | undefined;
 export function buildAuthorizationHeaders(token: string | undefined): Record<string, string> | undefined {
   return token === undefined ? undefined : { Authorization: `token ${token}` };
 }
 
 export function preferOptionalTokenError(tokenResult: ResolvedTokenResult, fallback: CliResult): CliResult {
   return tokenResult.error ?? fallback;
-}
-
-export function resolveOptionalToken(hostname: string, context: ResolvedCliExecutionContext): string | undefined {
-  return resolveOptionalTokenResult(hostname, context).token;
 }

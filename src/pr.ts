@@ -1047,7 +1047,7 @@ function resolveRequiredPullRequestToken(
   hostname: string,
   context: ResolvedCliExecutionContext,
   commandName: string
-): { token?: string; error?: CliResult } {
+): { token: string } | { error: CliResult } {
   return resolveRequiredTokenResult(hostname, context, {
     exitCode: 1,
     stdout: "",
@@ -1062,14 +1062,8 @@ async function createPullRequest(
 ): Promise<{ pullRequest?: PullRequestRecord; error?: CliResult }> {
   const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "create");
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls`;
@@ -1145,14 +1139,8 @@ async function commentOnPullRequest(
 ): Promise<{ error?: CliResult }> {
   const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "comment");
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr comment requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${pullRequestNumber}/comments`;
@@ -1233,14 +1221,8 @@ async function reviewPullRequest(
 ): Promise<{ error?: CliResult }> {
   const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "review");
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr review requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}/reviews`;
@@ -1331,14 +1313,8 @@ async function mergePullRequest(
 ): Promise<{ error?: CliResult }> {
   const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "merge");
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr merge requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}/merge`;
@@ -1662,14 +1638,8 @@ async function readPullRequestList(
 async function readCurrentUser(hostname: string, context: ResolvedCliExecutionContext): Promise<{ login?: string; error?: CliResult }> {
   const tokenResult = resolveRequiredPullRequestToken(hostname, context, "status");
 
-  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
-    return {
-      error: tokenResult.error ?? {
-        exitCode: 1,
-        stdout: "",
-        stderr: "gtea pr status requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
-      }
-    };
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
   }
 
   try {
