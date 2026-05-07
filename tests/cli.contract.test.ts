@@ -275,6 +275,55 @@ test("repo list reads repositories for the selected owner on the selected Gitea 
   }
 });
 
+test("repo list reports an unreadable native auth config when a failing request cannot use stored auth", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-repo-list-bad-config-"));
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/users/octo/repos") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const result = await executeCli(["repo", "list", "-R", `127.0.0.1:${port}/octo/project`], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot,
+        APPDATA: configRoot
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Could not read the native auth config/i);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
 test("repo list supports manifest-backed json output fields", async () => {
   let port = 0;
 
@@ -892,6 +941,55 @@ test("release list reads repository releases from the selected Gitea host", asyn
   }
 });
 
+test("release list reports an unreadable native auth config when a failing request cannot use stored auth", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-release-list-bad-config-"));
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/releases") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const result = await executeCli(["release", "list", "-R", `127.0.0.1:${port}/octo/project`], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot,
+        APPDATA: configRoot
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Could not read the native auth config/i);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
 test("release view supports manifest-backed json output fields with asset metadata", async () => {
   let port = 0;
 
@@ -1051,6 +1149,36 @@ test("release create posts the selected release metadata to the Gitea host", asy
         resolve();
       })
     );
+  }
+});
+
+test("release create reports an unreadable native auth config explicitly", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-release-create-bad-config-"));
+
+  try {
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const result = await executeCli([
+      "release",
+      "create",
+      "v1.2.3",
+      "-R",
+      "https://gitea.example.com/octo/project"
+    ], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot,
+        APPDATA: configRoot
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Could not read the native auth config/i);
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
   }
 });
 
@@ -2605,6 +2733,54 @@ test("pr list reads repository pull requests from the selected Gitea host", asyn
         resolve();
       })
     );
+  }
+});
+
+test("pr list reports an unreadable native auth config when a failing request cannot use stored auth", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-pr-list-bad-config-"));
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/pulls?state=open") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const result = await executeCli(["pr", "list", "-R", `127.0.0.1:${port}/octo/project`], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot,
+        APPDATA: configRoot
+      }
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Could not read the native auth config/i);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(configRoot, { force: true, recursive: true });
   }
 });
 
@@ -6856,6 +7032,73 @@ test("auth status reports an unreadable native auth config explicitly", async ()
     assert.match(result.stderr, /Could not read the native auth config/i);
   } finally {
     rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
+test("issue list reports an unreadable native auth config when stored auth cannot be read", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-issue-list-bad-config-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "gtea-issue-list-bad-config-repo-"));
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/issues?state=open") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const initResult = spawnSync("git", ["init", "--initial-branch=trunk"], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(initResult.status, 0, initResult.stderr);
+
+    const remoteResult = spawnSync("git", ["remote", "add", "origin", `http://127.0.0.1:${port}/octo/project.git`], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+
+    assert.equal(remoteResult.status, 0, remoteResult.stderr);
+
+    const env = {
+      HOME: configRoot,
+      XDG_CONFIG_HOME: configRoot,
+      APPDATA: configRoot
+    };
+
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const result = await executeCli(["issue", "list"], {
+      cwd: repoRoot,
+      env
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /Could not read the native auth config/i);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(configRoot, { force: true, recursive: true });
+    rmSync(repoRoot, { force: true, recursive: true });
   }
 });
 

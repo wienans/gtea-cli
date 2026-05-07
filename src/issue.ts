@@ -4,7 +4,14 @@ import { resolve as resolvePath } from "node:path";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import { buildHostBaseUrl } from "./host-config.js";
-import { type RepositoryContext, resolveOptionalToken, resolveRepositoryContext } from "./repository-context.js";
+import {
+  buildAuthorizationHeaders,
+  preferOptionalTokenError,
+  type RepositoryContext,
+  resolveOptionalTokenResult,
+  resolveRepositoryContext,
+  resolveRequiredTokenResult
+} from "./repository-context.js";
 import { renderStructuredJq, renderStructuredJson, renderStructuredTemplate, type StructuredObject } from "./structured-output.js";
 import { ManifestCommand, ManifestGroup, supportManifest } from "./support-manifest.js";
 
@@ -70,6 +77,18 @@ type IssueMutationCommandName = "create" | "edit";
 
 function issueMutationActionLabel(commandName: IssueMutationCommandName): "creating" | "editing" {
   return commandName === "create" ? "creating" : "editing";
+}
+
+function resolveRequiredIssueToken(
+  hostname: string,
+  context: ResolvedCliExecutionContext,
+  commandName: string
+): { token?: string; error?: CliResult } {
+  return resolveRequiredTokenResult(hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: `gtea issue ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
+  });
 }
 
 interface IssueRecord {
@@ -1600,41 +1619,39 @@ async function readIssuePayload(
   context: ResolvedCliExecutionContext
 ): Promise<{ payload?: GiteaIssuePayload; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (response.status === 401 || response.status === 403) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Authentication failed while reading issue #${issueNumber} on ${repository.hostname}.\n`
-        }
+        })
       };
     }
 
     if (response.status === 404) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Issue #${issueNumber} was not found in ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading issue #${issueNumber}.\n`
-        }
+        })
       };
     }
 
@@ -1672,41 +1689,39 @@ async function readIssueComments(
   context: ResolvedCliExecutionContext
 ): Promise<{ comments?: IssueCommentRecord[]; error?: CliResult }> {
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/issues/${issueNumber}/comments`;
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (response.status === 401 || response.status === 403) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Authentication failed while reading issue #${issueNumber} on ${repository.hostname}.\n`
-        }
+        })
       };
     }
 
     if (response.status === 404) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Issue #${issueNumber} was not found in ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading issue #${issueNumber}.\n`
-        }
+        })
       };
     }
 
@@ -1789,14 +1804,24 @@ async function readIssueEditLookupPayload<T>(
   context: ResolvedCliExecutionContext,
   commandName: IssueMutationCommandName
 ): Promise<{ payload: T } | { error: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredIssueToken(repository.hostname, context, commandName);
   const actionLabel = issueMutationActionLabel(commandName);
+
+  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
+    return {
+      error: tokenResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `gtea issue ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
+      }
+    };
+  }
+
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
     const response = await fetch(requestUrl, {
-      headers: {
-        Authorization: `token ${token ?? ""}`
-      }
+      headers: headers ?? {}
     });
 
     if (response.status === 401 || response.status === 403) {
@@ -1891,11 +1916,11 @@ async function createIssue(
   body: string | undefined,
   context: ResolvedCliExecutionContext
 ): Promise<{ issue?: IssueRecord; error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredIssueToken(repository.hostname, context, "create");
 
-  if (token === undefined) {
+  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
     return {
-      error: {
+      error: tokenResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: "gtea issue create requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
@@ -1909,7 +1934,7 @@ async function createIssue(
     const response = await fetch(requestUrl, {
       method: "POST",
       headers: {
-        Authorization: `token ${token}`,
+        Authorization: `token ${tokenResult.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify(body === undefined ? { title } : { title, body })
@@ -1971,11 +1996,11 @@ async function commentOnIssue(
   body: string,
   context: ResolvedCliExecutionContext
 ): Promise<{ error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredIssueToken(repository.hostname, context, "comment");
 
-  if (token === undefined) {
+  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
     return {
-      error: {
+      error: tokenResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: "gtea issue comment requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n"
@@ -1989,7 +2014,7 @@ async function commentOnIssue(
     const response = await fetch(requestUrl, {
       method: "POST",
       headers: {
-        Authorization: `token ${token}`,
+        Authorization: `token ${tokenResult.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify({ body })
@@ -2061,11 +2086,11 @@ async function updateIssue(
   commandName: "create" | "edit" | "close" | "reopen",
   actionLabel: string
 ): Promise<{ issue?: IssueRecord; error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredIssueToken(repository.hostname, context, commandName);
 
-  if (token === undefined) {
+  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
     return {
-      error: {
+      error: tokenResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: `gtea issue ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
@@ -2079,7 +2104,7 @@ async function updateIssue(
     const response = await fetch(requestUrl, {
       method: "PATCH",
       headers: {
-        Authorization: `token ${token}`,
+        Authorization: `token ${tokenResult.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify(payload)
@@ -2152,12 +2177,12 @@ async function replaceIssueLabels(
   context: ResolvedCliExecutionContext,
   commandName: IssueMutationCommandName
 ): Promise<{ error?: CliResult }> {
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveRequiredIssueToken(repository.hostname, context, commandName);
   const actionLabel = issueMutationActionLabel(commandName);
 
-  if (token === undefined) {
+  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
     return {
-      error: {
+      error: tokenResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: `gtea issue ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
@@ -2171,7 +2196,7 @@ async function replaceIssueLabels(
     const response = await fetch(requestUrl, {
       method: "PUT",
       headers: {
-        Authorization: `token ${token}`,
+        Authorization: `token ${tokenResult.token}`,
         "content-type": "application/json"
       },
       body: JSON.stringify({ labels: labelIds })
@@ -2451,21 +2476,19 @@ async function readIssueList(
   options: IssueListQueryOptions = { labels: [], state: "open" }
 ): Promise<{ issues?: IssueRecord[]; payload?: GiteaIssuePayload[]; error?: CliResult }> {
   const requestUrl = buildIssueListRequestUrl(repository, options);
-  const token = resolveOptionalToken(repository.hostname, context);
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
 
   try {
-    const response = await fetch(
-      requestUrl,
-      token === undefined ? undefined : { headers: { Authorization: `token ${token}` } }
-    );
+    const response = await fetch(requestUrl, headers === undefined ? undefined : { headers });
 
     if (!response.ok) {
       return {
-        error: {
+        error: preferOptionalTokenError(tokenResult, {
           exitCode: 1,
           stdout: "",
           stderr: `Gitea returned ${response.status} while reading issues for ${repository.owner}/${repository.repository}.\n`
-        }
+        })
       };
     }
 
@@ -2508,11 +2531,11 @@ async function readCurrentUser(
   context: ResolvedCliExecutionContext,
   commandName: "create" | "list" | "status" | "edit" = "status"
 ): Promise<{ login?: string; error?: CliResult }> {
-  const token = resolveOptionalToken(hostname, context);
+  const tokenResult = resolveRequiredIssueToken(hostname, context, commandName);
 
-  if (token === undefined) {
+  if (tokenResult.error !== undefined || tokenResult.token === undefined) {
     return {
-      error: {
+      error: tokenResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: `gtea issue ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
@@ -2523,7 +2546,7 @@ async function readCurrentUser(
   try {
     const response = await fetch(`${buildHostBaseUrl(hostname)}/api/v1/user`, {
       headers: {
-        Authorization: `token ${token}`
+        Authorization: `token ${tokenResult.token}`
       }
     });
 
