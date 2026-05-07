@@ -9,7 +9,7 @@ import {
   preferOptionalTokenError,
   type RepositoryContext,
   resolveOptionalTokenResult,
-  resolveRepositoryContext,
+  resolveRepositoryCommandTarget,
   resolveRequiredTokenResult
 } from "./repository-context.js";
 import { renderStructuredJq, renderStructuredJson, renderStructuredTemplate, type StructuredObject } from "./structured-output.js";
@@ -2753,9 +2753,9 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedCreateFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedCreateFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -2764,7 +2764,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     }
 
     const createResult = await createIssue(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedCreateFlags.flags.title,
       bodyInputResult.body,
       context
@@ -2782,7 +2782,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
     if (hasIssueMetadataChanges(createMetadataFlags)) {
       const metadataPlanResult = await planIssueEditMutations(
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         createResult.issue.number,
         createMetadataFlags,
         undefined,
@@ -2795,7 +2795,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       }
 
       const metadataApplyResult = await applyIssueMutationPlan(
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         createResult.issue.number,
         metadataPlanResult,
         context,
@@ -2841,9 +2841,9 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedMutationFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedMutationFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -2852,7 +2852,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     }
 
     const commentResult = await commentOnIssue(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedMutationFlags.flags.issueNumber,
       parsedMutationFlags.flags.body,
       context
@@ -2908,9 +2908,9 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedMutationFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedMutationFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -2922,7 +2922,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
     for (const issueNumber of parsedMutationFlags.flags.issueNumbers) {
       const editPlanResult = await planIssueEditMutations(
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         issueNumber,
         parsedMutationFlags.flags,
         bodyInputResult.body,
@@ -2935,7 +2935,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       }
 
       const applyResult = await applyIssueMutationPlan(
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         issueNumber,
         editPlanResult,
         context,
@@ -2997,9 +2997,9 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedMutationFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedMutationFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -3008,7 +3008,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     }
 
     const closeResult = await updateIssue(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedMutationFlags.flags.issueNumber,
       { state: "closed" },
       context,
@@ -3026,7 +3026,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
     if (parsedMutationFlags.flags.body !== undefined) {
       const commentResult = await commentOnIssue(
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         parsedMutationFlags.flags.issueNumber,
         parsedMutationFlags.flags.body,
         context
@@ -3063,9 +3063,9 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedMutationFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedMutationFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -3074,7 +3074,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     }
 
     const reopenResult = await updateIssue(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedMutationFlags.flags.issueNumber,
       { state: "open" },
       context,
@@ -3151,9 +3151,9 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     };
   }
 
-  const repositoryResult = resolveRepositoryContext(parsedFlags.flags.repository, context);
+  const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
 
-  if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+  if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
     return repositoryResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -3164,7 +3164,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   if (subcommand === "list") {
     const queryOptionsResult = await resolveIssueListQueryOptions(
       parsedFlags.flags,
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       context
     );
 
@@ -3176,7 +3176,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const issueListResult = await readIssueList(repositoryResult.repository, context, queryOptionsResult.options);
+    const issueListResult = await readIssueList(repositoryResult.target.repository, context, queryOptionsResult.options);
 
     if (issueListResult.error !== undefined || issueListResult.issues === undefined) {
       return issueListResult.error ?? {
@@ -3191,7 +3191,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
       if (parsedFlags.flags.jsonFields.includes("comments")) {
         const hydratedCommentResult = await hydrateIssueRecordComments(
-          repositoryResult.repository,
+          repositoryResult.target.repository,
           structuredIssues,
           context
         );
@@ -3238,7 +3238,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   }
 
   if (subcommand === "status") {
-    const currentUserResult = await readCurrentUser(repositoryResult.repository.hostname, context);
+    const currentUserResult = await readCurrentUser(repositoryResult.target.repository.hostname, context);
 
     if (currentUserResult.error !== undefined || currentUserResult.login === undefined) {
       return currentUserResult.error ?? {
@@ -3248,7 +3248,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
       };
     }
 
-    const issueListResult = await readIssueList(repositoryResult.repository, context);
+    const issueListResult = await readIssueList(repositoryResult.target.repository, context);
 
     if (
       issueListResult.error !== undefined
@@ -3306,7 +3306,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
     return {
       exitCode: 0,
-      stdout: renderIssueStatus(repositoryResult.repository, currentUserResult.login, assignedIssues, openedIssues),
+      stdout: renderIssueStatus(repositoryResult.target.repository, currentUserResult.login, assignedIssues, openedIssues),
       stderr: ""
     };
   }
@@ -3321,7 +3321,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
     };
   }
 
-  const issueResult = await readIssue(repositoryResult.repository, issueNumber, context);
+  const issueResult = await readIssue(repositoryResult.target.repository, issueNumber, context);
 
   if (issueResult.error !== undefined || issueResult.issue === undefined) {
     return issueResult.error ?? {
@@ -3336,7 +3336,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
 
     if (parsedFlags.flags.jsonFields.includes("comments")) {
       const hydratedCommentResult = await hydrateIssueRecordComments(
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         [structuredIssue],
         context
       );
@@ -3380,7 +3380,7 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   }
 
   if (parsedFlags.flags.showComments === true || (issueResult.issue.commentCount ?? 0) > 0) {
-    const commentResult = await readIssueComments(repositoryResult.repository, issueNumber, context);
+    const commentResult = await readIssueComments(repositoryResult.target.repository, issueNumber, context);
 
     if (commentResult.error !== undefined || commentResult.comments === undefined) {
       return commentResult.error ?? {

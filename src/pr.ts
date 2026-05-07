@@ -9,7 +9,7 @@ import {
   preferOptionalTokenError,
   type RepositoryContext,
   resolveOptionalTokenResult,
-  resolveRepositoryContext,
+  resolveRepositoryCommandTarget,
   resolveRequiredTokenResult
 } from "./repository-context.js";
 import {
@@ -1884,9 +1884,9 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedCreateFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedCreateFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1895,7 +1895,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
     }
 
     const createResult = await createPullRequest(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       {
         title: parsedCreateFlags.flags.title,
         base: parsedCreateFlags.flags.base,
@@ -1949,9 +1949,9 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedCommentFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedCommentFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1960,7 +1960,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
     }
 
     const commentResult = await commentOnPullRequest(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedCommentFlags.flags.pullRequestNumber,
       bodyInputResult.body,
       context
@@ -2006,9 +2006,9 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedReviewFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedReviewFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -2017,7 +2017,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
     }
 
     const reviewResult = await reviewPullRequest(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedReviewFlags.flags.pullRequestNumber,
       {
         event: parsedReviewFlags.flags.event,
@@ -2058,9 +2058,9 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedMergeFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedMergeFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -2069,7 +2069,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
     }
 
     const mergeResult = await mergePullRequest(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedMergeFlags.flags.pullRequestNumber,
       {
         method: parsedMergeFlags.flags.method ?? "merge",
@@ -2143,9 +2143,9 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
 
   const pullRequestNumber = parsedFlags.flags.pullRequestNumber;
 
-  const repositoryResult = resolveRepositoryContext(parsedFlags.flags.repository, context);
+  const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
 
-  if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+  if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
     return repositoryResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -2154,7 +2154,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
   }
 
   if (subcommand === "list") {
-    const pullRequestListResult = await readPullRequestList(repositoryResult.repository, context);
+    const pullRequestListResult = await readPullRequestList(repositoryResult.target.repository, context);
 
     if (pullRequestListResult.error !== undefined || pullRequestListResult.pullRequests === undefined) {
       return pullRequestListResult.error ?? {
@@ -2195,7 +2195,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
   }
 
   if (subcommand === "status") {
-    const currentUserResult = await readCurrentUser(repositoryResult.repository.hostname, context);
+    const currentUserResult = await readCurrentUser(repositoryResult.target.repository.hostname, context);
 
     if (currentUserResult.error !== undefined || currentUserResult.login === undefined) {
       return currentUserResult.error ?? {
@@ -2205,7 +2205,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       };
     }
 
-    const pullRequestListResult = await readPullRequestList(repositoryResult.repository, context);
+    const pullRequestListResult = await readPullRequestList(repositoryResult.target.repository, context);
 
     if (
       pullRequestListResult.error !== undefined
@@ -2263,7 +2263,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
     return {
       exitCode: 0,
       stdout: renderPullRequestStatus(
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         currentUserResult.login,
         assignedPullRequests,
         openedPullRequests
@@ -2282,7 +2282,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
 
   if (subcommand === "diff") {
     const diffResult = await readPullRequestDiff(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       pullRequestNumber,
       context
     );
@@ -2303,7 +2303,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
   }
 
   const pullRequestResult = await readPullRequest(
-    repositoryResult.repository,
+    repositoryResult.target.repository,
     pullRequestNumber,
     context
   );

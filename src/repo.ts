@@ -8,7 +8,7 @@ import {
   type RepositoryContext,
   resolveOptionalTokenResult,
   resolveRequiredTokenResult,
-  resolveRepositoryContext
+  resolveRepositoryCommandTarget
 } from "./repository-context.js";
 import { renderStructuredJq, renderStructuredJson, renderStructuredTemplate, type StructuredObject } from "./structured-output.js";
 import { ManifestCommand, ManifestGroup, supportManifest } from "./support-manifest.js";
@@ -1544,9 +1544,9 @@ export async function executeRepoCommand(args: string[], context: ResolvedCliExe
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedRenameFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedRenameFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1554,13 +1554,13 @@ export async function executeRepoCommand(args: string[], context: ResolvedCliExe
       };
     }
 
-    const renameResult = await renameRepository(repositoryResult.repository, parsedRenameFlags.flags.newName, context);
+    const renameResult = await renameRepository(repositoryResult.target.repository, parsedRenameFlags.flags.newName, context);
 
     if (renameResult.error !== undefined || renameResult.repo === undefined) {
       return renameResult.error ?? {
         exitCode: 1,
         stdout: "",
-        stderr: `Failed to rename repository ${repositoryResult.repository.owner}/${repositoryResult.repository.repository}.\n`
+        stderr: `Failed to rename repository ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}.\n`
       };
     }
 
@@ -1578,9 +1578,9 @@ export async function executeRepoCommand(args: string[], context: ResolvedCliExe
       return parsedForkFlags.error;
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedForkFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedForkFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1598,25 +1598,25 @@ export async function executeRepoCommand(args: string[], context: ResolvedCliExe
       forkOptions.organization = parsedForkFlags.flags.organization;
     }
 
-    const forkResult = await forkRepository(repositoryResult.repository, forkOptions, context);
+    const forkResult = await forkRepository(repositoryResult.target.repository, forkOptions, context);
 
     if (forkResult.error !== undefined || forkResult.repo === undefined) {
       return forkResult.error ?? {
         exitCode: 1,
         stdout: "",
-        stderr: `Failed to fork repository ${repositoryResult.repository.owner}/${repositoryResult.repository.repository}.\n`
+        stderr: `Failed to fork repository ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}.\n`
       };
     }
 
     if (parsedForkFlags.flags.clone) {
       const cloneResult = cloneRepository(
         {
-          hostname: repositoryResult.repository.hostname,
+          hostname: repositoryResult.target.repository.hostname,
           owner: forkResult.repo.owner,
           repository: forkResult.repo.name
         },
         forkResult.cloneUrl ?? buildRepositoryGitUrl({
-          hostname: repositoryResult.repository.hostname,
+          hostname: repositoryResult.target.repository.hostname,
           owner: forkResult.repo.owner,
           repository: forkResult.repo.name
         }),
@@ -1651,7 +1651,9 @@ export async function executeRepoCommand(args: string[], context: ResolvedCliExe
     return structuredFlagsError;
   }
 
-  const { repository, error: repositoryError } = resolveRepositoryContext(flags.repository, context);
+  const repositoryTarget = resolveRepositoryCommandTarget(flags.repository, { mode: "none" }, context);
+  const repository = repositoryTarget.target?.repository;
+  const repositoryError = repositoryTarget.error;
 
   if (repositoryError !== undefined || repository === undefined) {
     return repositoryError ?? {

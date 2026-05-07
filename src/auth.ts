@@ -4,24 +4,18 @@ import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import {
   buildHostBaseUrl,
   buildProcessEnv,
-  isEligibleHost,
   loadNativeAuthConfig,
   parseHostname,
   saveNativeAuthConfig,
   type NativeAuthConfig
 } from "./host-config.js";
+import { resolveHostCommandTarget } from "./repository-context.js";
 import { supportManifest } from "./support-manifest.js";
 
 interface ParsedAuthFlags {
   hostname?: string;
   showToken: boolean;
   withToken: boolean;
-}
-
-interface ResolvedCredential {
-  hostname: string;
-  token: string;
-  credentialSource: string;
 }
 
 interface GitCredentialInput {
@@ -133,18 +127,6 @@ function parseAuthFlags(args: string[]): { flags: ParsedAuthFlags; error?: CliRe
   return { flags };
 }
 
-function resolveEnvHost(context: ResolvedCliExecutionContext): { hostname?: string; error?: CliResult } {
-  if (context.env.GTEA_HOST !== undefined) {
-    return parseProvidedHostname(context.env.GTEA_HOST, "GTEA_HOST");
-  }
-
-  if (context.env.GH_HOST !== undefined) {
-    return parseProvidedHostname(context.env.GH_HOST, "GH_HOST");
-  }
-
-  return {};
-}
-
 function resolveEnvToken(context: ResolvedCliExecutionContext): { token: string; source: string } | undefined {
   if (context.env.GTEA_TOKEN !== undefined) {
     return {
@@ -161,113 +143,6 @@ function resolveEnvToken(context: ResolvedCliExecutionContext): { token: string;
   }
 
   return undefined;
-}
-
-function resolveSelectedHost(
-  explicitHostname: string | undefined,
-  context: ResolvedCliExecutionContext,
-  config: NativeAuthConfig,
-  explicitHostnameSource = "--hostname"
-): { hostname?: string; error?: CliResult } {
-  const fallbackStoredHost = Object.keys(config.hosts).sort()[0];
-  const explicitHost = parseProvidedHostname(explicitHostname, explicitHostnameSource);
-
-  if (explicitHost.error !== undefined) {
-    return {
-      error: explicitHost.error
-    };
-  }
-
-  const envHost = resolveEnvHost(context);
-
-  if (envHost.error !== undefined) {
-    return {
-      error: envHost.error
-    };
-  }
-
-  const parsedHostname = explicitHost.hostname ?? envHost.hostname ?? config.activeHost ?? fallbackStoredHost;
-
-  if (parsedHostname === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "No Gitea Host selected. Pass --hostname or set GTEA_HOST/GH_HOST.\n"
-      }
-    };
-  }
-
-  if (!isEligibleHost(parsedHostname)) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Host ${parsedHostname} is not an Eligible Host for ${"gtea"}.\n`
-      }
-    };
-  }
-
-  return {
-    hostname: parsedHostname
-  };
-}
-
-function resolveCredential(
-  explicitHostname: string | undefined,
-  context: ResolvedCliExecutionContext,
-  config: NativeAuthConfig,
-  explicitHostnameSource = "--hostname"
-): { credential?: ResolvedCredential; error?: CliResult } {
-  const selectedHostResult = resolveSelectedHost(explicitHostname, context, config, explicitHostnameSource);
-
-  if (selectedHostResult.error !== undefined) {
-    return {
-      error: selectedHostResult.error
-    };
-  }
-
-  if (selectedHostResult.hostname === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "No Gitea Host selected.\n"
-      }
-    };
-  }
-
-  const envToken = resolveEnvToken(context);
-
-  if (envToken !== undefined) {
-    return {
-      credential: {
-        hostname: selectedHostResult.hostname,
-        token: envToken.token,
-        credentialSource: envToken.source
-      }
-    };
-  }
-
-  const storedCredential = config.hosts[selectedHostResult.hostname];
-
-  if (storedCredential === undefined) {
-    return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: `No Personal Access Token is configured for ${selectedHostResult.hostname}. Run gtea auth login first.\n`
-      }
-    };
-  }
-
-  return {
-    credential: {
-      hostname: selectedHostResult.hostname,
-      token: storedCredential.token,
-      credentialSource: "native config store"
-    }
-  };
 }
 
 function readTokenFromStdin(context: ResolvedCliExecutionContext): string | undefined {
@@ -297,6 +172,62 @@ function parseGitCredentialInput(stdin: string): GitCredentialInput {
 
 function resolveRequestedToken(flags: ParsedAuthFlags, context: ResolvedCliExecutionContext): string | undefined {
   return flags.withToken ? readTokenFromStdin(context) : resolveEnvToken(context)?.token;
+}
+
+function resolveAuthHostTarget(
+  rawHostname: string | undefined,
+  context: ResolvedCliExecutionContext,
+  explicitHostnameSource = "--hostname"
+): { hostname?: string; error?: CliResult } {
+  const hostTarget = resolveHostCommandTarget(rawHostname, { mode: "none" }, context, explicitHostnameSource);
+
+  if (hostTarget.error !== undefined || hostTarget.target === undefined) {
+    return {
+      error: hostTarget.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Gitea Host selected.\n"
+      }
+    };
+  }
+
+  return {
+    hostname: hostTarget.target.hostname
+  };
+}
+
+function resolveAuthCredentialTarget(
+  rawHostname: string | undefined,
+  context: ResolvedCliExecutionContext,
+  explicitHostnameSource = "--hostname"
+): { hostname?: string; token?: string; credentialSource?: string; error?: CliResult } {
+  const hostTarget = resolveHostCommandTarget(rawHostname, { mode: "optional" }, context, explicitHostnameSource);
+
+  if (hostTarget.error !== undefined || hostTarget.target === undefined) {
+    return {
+      error: hostTarget.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Gitea Host selected.\n"
+      }
+    };
+  }
+
+  if (hostTarget.target.credential === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `No Personal Access Token is configured for ${hostTarget.target.hostname}. Run gtea auth login first.\n`
+      }
+    };
+  }
+
+  return {
+    hostname: hostTarget.target.hostname,
+    token: hostTarget.target.credential.token,
+    credentialSource: hostTarget.target.credential.source
+  };
 }
 
 function loadAuthConfig(context: ResolvedCliExecutionContext): { config?: NativeAuthConfig; error?: CliResult } {
@@ -330,8 +261,7 @@ function handleAuthLogin(args: string[], context: ResolvedCliExecutionContext): 
     };
   }
 
-  const config = configResult.config;
-  const selectedHostResult = resolveSelectedHost(parsedFlags.flags.hostname, context, config);
+  const selectedHostResult = resolveAuthHostTarget(parsedFlags.flags.hostname, context);
 
   if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
     return selectedHostResult.error ?? {
@@ -340,6 +270,8 @@ function handleAuthLogin(args: string[], context: ResolvedCliExecutionContext): 
       stderr: "No Gitea Host selected.\n"
     };
   }
+
+  const config = configResult.config;
 
   const token = resolveRequestedToken(parsedFlags.flags, context);
 
@@ -383,8 +315,7 @@ function handleAuthRefresh(args: string[], context: ResolvedCliExecutionContext)
     };
   }
 
-  const config = configResult.config;
-  const selectedHostResult = resolveSelectedHost(parsedFlags.flags.hostname, context, config);
+  const selectedHostResult = resolveAuthHostTarget(parsedFlags.flags.hostname, context);
 
   if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
     return selectedHostResult.error ?? {
@@ -393,6 +324,8 @@ function handleAuthRefresh(args: string[], context: ResolvedCliExecutionContext)
       stderr: "No Gitea Host selected.\n"
     };
   }
+
+  const config = configResult.config;
 
   if (config.hosts[selectedHostResult.hostname] === undefined) {
     return {
@@ -444,10 +377,14 @@ function handleAuthSetupGit(args: string[], context: ResolvedCliExecutionContext
     };
   }
 
-  const config = configResult.config;
-  const credentialResult = resolveCredential(parsedFlags.flags.hostname, context, config);
+  const credentialResult = resolveAuthCredentialTarget(parsedFlags.flags.hostname, context);
 
-  if (credentialResult.error !== undefined || credentialResult.credential === undefined) {
+  if (
+    credentialResult.error !== undefined
+    || credentialResult.hostname === undefined
+    || credentialResult.token === undefined
+    || credentialResult.credentialSource === undefined
+  ) {
     return credentialResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -455,10 +392,10 @@ function handleAuthSetupGit(args: string[], context: ResolvedCliExecutionContext
     };
   }
 
-  const credentialBaseUrl = buildHostBaseUrl(credentialResult.credential.hostname);
+  const credentialBaseUrl = buildHostBaseUrl(credentialResult.hostname);
   const helperKey = `credential.${credentialBaseUrl}.helper`;
   const usernameKey = `credential.${credentialBaseUrl}.username`;
-  const helperValue = `!${supportManifest.cliName} auth git-credential --hostname ${credentialResult.credential.hostname}`;
+  const helperValue = `!${supportManifest.cliName} auth git-credential --hostname ${credentialResult.hostname}`;
 
   const helperWrite = spawnSync("git", ["config", "--global", helperKey, helperValue], {
     cwd: context.cwd,
@@ -490,7 +427,7 @@ function handleAuthSetupGit(args: string[], context: ResolvedCliExecutionContext
 
   return {
     exitCode: 0,
-    stdout: `Configured Git credential helper for ${credentialResult.credential.hostname}.\n`,
+    stdout: `Configured Git credential helper for ${credentialResult.hostname}.\n`,
     stderr: ""
   };
 }
@@ -529,22 +466,11 @@ function handleAuthGitCredential(args: string[], context: ResolvedCliExecutionCo
   }
 
   const gitCredentialInput = parseGitCredentialInput(context.stdin);
-  const configResult = loadAuthConfig(context);
-
-  if (configResult.error !== undefined || configResult.config === undefined) {
-    return configResult.error ?? {
-      exitCode: 1,
-      stdout: "",
-      stderr: "Could not read the native auth config.\n"
-    };
-  }
-
-  const config = configResult.config;
   const credentialHost = parsedFlags.flags.hostname ?? gitCredentialInput.host;
   const credentialHostSource = parsedFlags.flags.hostname !== undefined ? "--hostname" : "git credential input host";
-  const credentialResult = resolveCredential(credentialHost, context, config, credentialHostSource);
+  const credentialResult = resolveAuthCredentialTarget(credentialHost, context, credentialHostSource);
 
-  if (credentialResult.error !== undefined || credentialResult.credential === undefined) {
+  if (credentialResult.error !== undefined || credentialResult.token === undefined) {
     return credentialResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -554,7 +480,7 @@ function handleAuthGitCredential(args: string[], context: ResolvedCliExecutionCo
 
   return {
     exitCode: 0,
-    stdout: `username=oauth2\npassword=${credentialResult.credential.token}\n`,
+    stdout: `username=oauth2\npassword=${credentialResult.token}\n`,
     stderr: ""
   };
 }
@@ -566,20 +492,14 @@ function handleAuthStatus(args: string[], context: ResolvedCliExecutionContext):
     return parsedFlags.error;
   }
 
-  const configResult = loadAuthConfig(context);
+  const credentialResult = resolveAuthCredentialTarget(parsedFlags.flags.hostname, context);
 
-  if (configResult.error !== undefined || configResult.config === undefined) {
-    return configResult.error ?? {
-      exitCode: 1,
-      stdout: "",
-      stderr: "Could not read the native auth config.\n"
-    };
-  }
-
-  const config = configResult.config;
-  const credentialResult = resolveCredential(parsedFlags.flags.hostname, context, config);
-
-  if (credentialResult.error !== undefined || credentialResult.credential === undefined) {
+  if (
+    credentialResult.error !== undefined
+    || credentialResult.hostname === undefined
+    || credentialResult.token === undefined
+    || credentialResult.credentialSource === undefined
+  ) {
     return credentialResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -588,12 +508,12 @@ function handleAuthStatus(args: string[], context: ResolvedCliExecutionContext):
   }
 
   const lines = [
-    `Active host: ${credentialResult.credential.hostname}`,
-    `Credential source: ${credentialResult.credential.credentialSource}`
+    `Active host: ${credentialResult.hostname}`,
+    `Credential source: ${credentialResult.credentialSource}`
   ];
 
   if (parsedFlags.flags.showToken) {
-    lines.push(`Token: ${credentialResult.credential.token}`);
+    lines.push(`Token: ${credentialResult.token}`);
   }
 
   return {
@@ -610,20 +530,9 @@ function handleAuthToken(args: string[], context: ResolvedCliExecutionContext): 
     return parsedFlags.error;
   }
 
-  const configResult = loadAuthConfig(context);
+  const credentialResult = resolveAuthCredentialTarget(parsedFlags.flags.hostname, context);
 
-  if (configResult.error !== undefined || configResult.config === undefined) {
-    return configResult.error ?? {
-      exitCode: 1,
-      stdout: "",
-      stderr: "Could not read the native auth config.\n"
-    };
-  }
-
-  const config = configResult.config;
-  const credentialResult = resolveCredential(parsedFlags.flags.hostname, context, config);
-
-  if (credentialResult.error !== undefined || credentialResult.credential === undefined) {
+  if (credentialResult.error !== undefined || credentialResult.token === undefined) {
     return credentialResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -633,7 +542,7 @@ function handleAuthToken(args: string[], context: ResolvedCliExecutionContext): 
 
   return {
     exitCode: 0,
-    stdout: `${credentialResult.credential.token}\n`,
+    stdout: `${credentialResult.token}\n`,
     stderr: ""
   };
 }
@@ -655,8 +564,7 @@ function handleAuthSwitch(args: string[], context: ResolvedCliExecutionContext):
     };
   }
 
-  const config = configResult.config;
-  const selectedHostResult = resolveSelectedHost(parsedFlags.flags.hostname, context, config);
+  const selectedHostResult = resolveAuthHostTarget(parsedFlags.flags.hostname, context);
 
   if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
     return selectedHostResult.error ?? {
@@ -665,6 +573,8 @@ function handleAuthSwitch(args: string[], context: ResolvedCliExecutionContext):
       stderr: "No Gitea Host selected.\n"
     };
   }
+
+  const config = configResult.config;
 
   if (config.hosts[selectedHostResult.hostname] === undefined) {
     return {
@@ -701,8 +611,7 @@ function handleAuthLogout(args: string[], context: ResolvedCliExecutionContext):
     };
   }
 
-  const config = configResult.config;
-  const selectedHostResult = resolveSelectedHost(parsedFlags.flags.hostname, context, config);
+  const selectedHostResult = resolveAuthHostTarget(parsedFlags.flags.hostname, context);
 
   if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
     return selectedHostResult.error ?? {
@@ -711,6 +620,8 @@ function handleAuthLogout(args: string[], context: ResolvedCliExecutionContext):
       stderr: "No Gitea Host selected.\n"
     };
   }
+
+  const config = configResult.config;
 
   if (config.hosts[selectedHostResult.hostname] === undefined) {
     return {
