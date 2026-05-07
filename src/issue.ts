@@ -835,7 +835,8 @@ function parseIssueMutationFlags(
     allowBodyFile: boolean;
     allowMultipleIssueNumbers?: boolean;
     bodyFlag?: { long: string; short?: string };
-    unsupportedValueFlags?: Array<{ commandName: string; long: string; short?: string; reason: string }>;
+    unsupportedValueFlagCommandName?: string;
+    unsupportedValueFlags?: Array<{ long: string; short?: string; reason: string }>;
   }
 ): { flags: ParsedIssueMutationFlags; error?: CliResult } {
   const flags: ParsedIssueMutationFlags = {
@@ -1082,7 +1083,7 @@ function parseIssueMutationFlags(
         return {
           flags,
           error: renderUnsupportedIssueFlag(
-            unsupportedFlag.commandName,
+            options.unsupportedValueFlagCommandName ?? "edit",
             unsupportedFlag.long,
             unsupportedFlag.reason
           )
@@ -2983,15 +2984,14 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
         long: "--comment",
         short: "-c"
       },
+      unsupportedValueFlagCommandName: "close",
       unsupportedValueFlags: [
         {
-          commandName: "close",
           long: "--reason",
           short: "-r",
           reason: "GitHub-style close reasons are not part of the supported issue maintenance slice."
         },
         {
-          commandName: "close",
           long: "--duplicate-of",
           reason: "Duplicate marking during issue close is not part of the supported issue maintenance slice."
         }
