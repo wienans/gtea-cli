@@ -113,6 +113,64 @@ test("repo view reads a single repository from the selected Gitea host", async (
   }
 });
 
+test("repo view ignores an unreadable native auth config when -R selects the host explicitly", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-repo-view-bad-config-"));
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        name: "project",
+        full_name: "octo/project",
+        private: false,
+        html_url: `http://127.0.0.1:${getServerPort(server)}/octo/project`,
+        owner: {
+          login: "octo"
+        }
+      })
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const result = await executeCli(["repo", "view", "-R", `127.0.0.1:${port}/octo/project`], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot,
+        APPDATA: configRoot
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /octo\/project/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
 test("repo view requires --json when --jq is provided", async () => {
   const result = await executeCli([
     "repo",

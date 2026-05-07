@@ -34,14 +34,6 @@ function parseRepositoryTarget(rawRepository: string, context: ResolvedCliExecut
     };
   }
 
-  const config = loadNativeAuthConfig(context);
-
-  if (config.error !== undefined) {
-    return {
-      error: config.error
-    };
-  }
-
   const repository = segments.at(-1);
   const owner = segments.at(-2);
   const explicitHostSegments = segments.slice(0, -2);
@@ -57,7 +49,19 @@ function parseRepositoryTarget(rawRepository: string, context: ResolvedCliExecut
     };
   }
 
-  const hostname = explicitHost === undefined ? resolveSelectedHost(context, config) : parseHostname(explicitHost);
+  let hostname = parseHostname(explicitHost);
+
+  if (explicitHost === undefined) {
+    const config = loadNativeAuthConfig(context);
+
+    if (config.error !== undefined) {
+      return {
+        error: config.error
+      };
+    }
+
+    hostname = resolveSelectedHost(context, config);
+  }
 
   if (hostname === undefined) {
     return {
