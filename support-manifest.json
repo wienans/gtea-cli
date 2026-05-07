@@ -1102,6 +1102,33 @@
         "status": "supported"
       }
     ],
+    "issueCloseOptions": [
+      {
+        "name": "--comment",
+        "aliases": [
+          "-c"
+        ],
+        "summary": "Leave a closing comment",
+        "status": "supported"
+      }
+    ],
+    "issueCloseUnsupportedOptions": [
+      {
+        "name": "--reason",
+        "aliases": [
+          "-r"
+        ],
+        "summary": "Reason for closing: {completed|not planned|duplicate}",
+        "status": "unsupported",
+        "reason": "GitHub-style close reasons are not part of the supported issue maintenance slice."
+      },
+      {
+        "name": "--duplicate-of",
+        "summary": "Mark as duplicate of another issue by number or URL",
+        "status": "unsupported",
+        "reason": "Duplicate marking during issue close is not part of the supported issue maintenance slice."
+      }
+    ],
     "issueEditOptions": [
       {
         "name": "--title",
@@ -1748,7 +1775,9 @@
           "summary": "Close an issue",
           "status": "supported",
           "flagProfiles": [
-            "issueRepositoryTarget"
+            "issueRepositoryTarget",
+            "issueCloseOptions",
+            "issueCloseUnsupportedOptions"
           ]
         },
         {

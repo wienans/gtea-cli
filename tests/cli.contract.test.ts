@@ -1417,6 +1417,15 @@ test("issue edit help classifies supported and unsupported metadata flags", asyn
   assert.match(result.stdout, /--remove-project[\s\S]*\[unsupported\]/i);
 });
 
+test("issue close help classifies closing comment and unsupported close-only flags", async () => {
+  const result = await executeCli(["issue", "close", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--comment, -c[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--reason, -r[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--duplicate-of[\s\S]*\[unsupported\]/i);
+});
+
 test("issue create help classifies supported, emulated, and unsupported flags", async () => {
   const result = await executeCli(["issue", "create", "--help"]);
 
@@ -5535,6 +5544,153 @@ test("issue close patches the selected issue state to closed quietly", async () 
       })
     );
   }
+});
+
+test("issue close posts a closing comment and stays quiet on success", async () => {
+  const seenRequests: Array<{ method: string; url: string | undefined; body: unknown }> = [];
+
+  const server = createServer(async (request, response) => {
+    if (request.headers.authorization !== "token close-token") {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "unauthorized" }));
+      return;
+    }
+
+    if (
+      request.method !== "PATCH"
+      && request.method !== "POST"
+    ) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    const parsedBody = JSON.parse(requestBody);
+    seenRequests.push({
+      method: request.method,
+      url: request.url,
+      body: parsedBody
+    });
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/project/issues/18") {
+      assert.deepEqual(parsedBody, {
+        state: "closed"
+      });
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 18,
+          title: "Close the issue",
+          state: "closed"
+        })
+      );
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/v1/repos/octo/project/issues/18/comments") {
+      assert.deepEqual(parsedBody, {
+        body: "Closing from gtea"
+      });
+
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: 10 }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "issue",
+      "close",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--comment",
+      "Closing from gtea"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "close-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.deepEqual(seenRequests, [
+      {
+        method: "PATCH",
+        url: "/api/v1/repos/octo/project/issues/18",
+        body: {
+          state: "closed"
+        }
+      },
+      {
+        method: "POST",
+        url: "/api/v1/repos/octo/project/issues/18/comments",
+        body: {
+          body: "Closing from gtea"
+        }
+      }
+    ]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("issue close rejects unsupported close-only flags explicitly", async () => {
+  const reasonResult = await executeCli([
+    "issue",
+    "close",
+    "18",
+    "-R",
+    "gitea.example.com/octo/project",
+    "--reason",
+    "completed"
+  ]);
+
+  assert.equal(reasonResult.exitCode, 1);
+  assert.equal(reasonResult.stdout, "");
+  assert.match(reasonResult.stderr, /gtea issue close flag --reason is currently unsupported/i);
+  assert.match(reasonResult.stderr, /close reasons are not part of the supported issue maintenance slice/i);
+
+  const duplicateResult = await executeCli([
+    "issue",
+    "close",
+    "18",
+    "-R",
+    "gitea.example.com/octo/project",
+    "--duplicate-of",
+    "19"
+  ]);
+
+  assert.equal(duplicateResult.exitCode, 1);
+  assert.equal(duplicateResult.stdout, "");
+  assert.match(duplicateResult.stderr, /gtea issue close flag --duplicate-of is currently unsupported/i);
+  assert.match(duplicateResult.stderr, /duplicate marking during issue close is not part of the supported issue maintenance slice/i);
 });
 
 test("issue reopen patches the selected issue state to open quietly", async () => {

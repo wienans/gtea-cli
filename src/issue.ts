@@ -829,7 +829,15 @@ function parseIssueCreateFlags(args: string[]): { flags: ParsedIssueCreateFlags;
 
 function parseIssueMutationFlags(
   args: string[],
-  options: { allowTitle: boolean; allowBody: boolean; allowBodyFile: boolean; allowMultipleIssueNumbers?: boolean }
+  options: {
+    allowTitle: boolean;
+    allowBody: boolean;
+    allowBodyFile: boolean;
+    allowMultipleIssueNumbers?: boolean;
+    bodyFlag?: { long: string; short?: string };
+    unsupportedValueFlagCommandName?: string;
+    unsupportedValueFlags?: Array<{ long: string; short?: string; reason: string }>;
+  }
 ): { flags: ParsedIssueMutationFlags; error?: CliResult } {
   const flags: ParsedIssueMutationFlags = {
     issueNumbers: [],
@@ -879,7 +887,7 @@ function parseIssueMutationFlags(
     }
 
     const bodyFlag = options.allowBody
-      ? parseStringFlagValue(args, index, { long: "--body" })
+      ? parseStringFlagValue(args, index, options.bodyFlag ?? { long: "--body" })
       : { handled: false, nextIndex: index };
 
     if (bodyFlag.error !== undefined) {
@@ -1056,6 +1064,31 @@ function parseIssueMutationFlags(
           "Project edits are not part of the supported issue maintenance slice."
         )
       };
+    }
+
+    for (const unsupportedFlag of options.unsupportedValueFlags ?? []) {
+      const unsupportedValueFlag = parseStringFlagValue(args, index, {
+        long: unsupportedFlag.long,
+        ...(unsupportedFlag.short === undefined ? {} : { short: unsupportedFlag.short })
+      });
+
+      if (unsupportedValueFlag.error !== undefined) {
+        return {
+          flags,
+          error: unsupportedValueFlag.error
+        };
+      }
+
+      if (unsupportedValueFlag.handled) {
+        return {
+          flags,
+          error: renderUnsupportedIssueFlag(
+            options.unsupportedValueFlagCommandName ?? "edit",
+            unsupportedFlag.long,
+            unsupportedFlag.reason
+          )
+        };
+      }
     }
 
     if (token.startsWith("-")) {
@@ -2945,8 +2978,24 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
   if (subcommand === "close") {
     const parsedMutationFlags = parseIssueMutationFlags(args.slice(2), {
       allowTitle: false,
-      allowBody: false,
-      allowBodyFile: false
+      allowBody: true,
+      allowBodyFile: false,
+      bodyFlag: {
+        long: "--comment",
+        short: "-c"
+      },
+      unsupportedValueFlagCommandName: "close",
+      unsupportedValueFlags: [
+        {
+          long: "--reason",
+          short: "-r",
+          reason: "GitHub-style close reasons are not part of the supported issue maintenance slice."
+        },
+        {
+          long: "--duplicate-of",
+          reason: "Duplicate marking during issue close is not part of the supported issue maintenance slice."
+        }
+      ]
     });
 
     if (parsedMutationFlags.error !== undefined) {
@@ -2986,6 +3035,19 @@ export async function executeIssueCommand(args: string[], context: ResolvedCliEx
         stdout: "",
         stderr: "Failed to close issue.\n"
       };
+    }
+
+    if (parsedMutationFlags.flags.body !== undefined) {
+      const commentResult = await commentOnIssue(
+        repositoryResult.repository,
+        parsedMutationFlags.flags.issueNumber,
+        parsedMutationFlags.flags.body,
+        context
+      );
+
+      if (commentResult.error !== undefined) {
+        return commentResult.error;
+      }
     }
 
     return {
