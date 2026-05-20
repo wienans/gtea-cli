@@ -37,7 +37,7 @@ test("label help exposes the gh-shaped subcommand tree", async () => {
   const result = await executeCli(["label", "--help"]);
 
   assert.equal(result.exitCode, 0);
-  assert.match(result.stdout, /clone[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /clone[\s\S]*\[emulated\]/i);
   assert.match(result.stdout, /create[\s\S]*\[supported\]/i);
   assert.match(result.stdout, /delete[\s\S]*\[supported\]/i);
   assert.match(result.stdout, /edit[\s\S]*\[supported\]/i);
@@ -59,9 +59,14 @@ test("label list help classifies supported and unsupported list flags and fields
 });
 
 test("label write help classifies supported, emulated, and unsupported flags honestly", async () => {
+  const cloneHelp = await executeCli(["label", "clone", "--help"]);
   const createHelp = await executeCli(["label", "create", "--help"]);
   const editHelp = await executeCli(["label", "edit", "--help"]);
   const deleteHelp = await executeCli(["label", "delete", "--help"]);
+
+  assert.equal(cloneHelp.exitCode, 0);
+  assert.match(cloneHelp.stdout, /--repo, -R[\s\S]*\[supported\]/i);
+  assert.match(cloneHelp.stdout, /--force, -f[\s\S]*\[emulated\]/i);
 
   assert.equal(createHelp.exitCode, 0);
   assert.match(createHelp.stdout, /--repo, -R[\s\S]*\[supported\]/i);
@@ -694,6 +699,261 @@ test("label delete resolves the selected Repository Label by name and deletes it
         resolve();
       })
     );
+  }
+});
+
+test("label clone copies missing Repository Labels from a same-host source repository", async () => {
+  const createdLabels: Array<{ name: string; color: string; description?: string }> = [];
+
+  const server = createServer(async (request, response) => {
+    assert.equal(request.headers.authorization, "token label-clone-token");
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/source/labels") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 1,
+            name: "bug",
+            description: "Source bug label",
+            color: "d73a4a"
+          },
+          {
+            id: 2,
+            name: "feature",
+            color: "a2eeef"
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/destination/labels") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 9,
+            name: "bug",
+            description: "Destination bug label",
+            color: "111111"
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/api/v1/repos/octo/destination/labels") {
+      let requestBody = "";
+
+      for await (const chunk of request) {
+        requestBody += chunk;
+      }
+
+      createdLabels.push(JSON.parse(requestBody) as { name: string; color: string; description?: string });
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: 10 }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "label",
+      "clone",
+      `http://127.0.0.1:${port}/octo/source`,
+      "-R",
+      `http://127.0.0.1:${port}/octo/destination`
+    ], {
+      env: {
+        GTEA_HOST: `http://127.0.0.1:${port}`,
+        GTEA_TOKEN: "label-clone-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.deepEqual(createdLabels, [
+      {
+        name: "feature",
+        color: "a2eeef"
+      }
+    ]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("label clone replaces existing Repository Labels when --force is provided", async () => {
+  let patchBody = "";
+
+  const server = createServer(async (request, response) => {
+    assert.equal(request.headers.authorization, "token label-clone-token");
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/source/labels") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 1,
+            name: "bug",
+            description: null,
+            color: "d73a4a"
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/destination/labels") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 9,
+            name: "bug",
+            description: "Old description",
+            color: "111111"
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/destination/labels/9") {
+      for await (const chunk of request) {
+        patchBody += chunk;
+      }
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ id: 9 }));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "label",
+      "clone",
+      `http://127.0.0.1:${port}/octo/source`,
+      "-R",
+      `http://127.0.0.1:${port}/octo/destination`,
+      "--force"
+    ], {
+      env: {
+        GTEA_HOST: `http://127.0.0.1:${port}`,
+        GTEA_TOKEN: "label-clone-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(patchBody), {
+      name: "bug",
+      color: "d73a4a",
+      description: ""
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("label clone rejects source and destination host mismatches before mutating labels", async () => {
+  const result = await executeCli([
+    "label",
+    "clone",
+    "http://gitea.example.com/octo/source",
+    "-R",
+    "https://gitea.example.com/octo/destination"
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "gtea label clone requires source and destination repositories to use the same Gitea Host. Source: http://gitea.example.com. Destination: https://gitea.example.com.\n"
+  );
+});
+
+test("label clone surfaces direct Repository Context and Host Credential errors", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "gtea-label-clone-context-"));
+
+  try {
+    const missingContextResult = await executeCli([
+      "label",
+      "clone",
+      "https://gitea.example.com/octo/source"
+    ], {
+      cwd
+    });
+
+    assert.equal(missingContextResult.exitCode, 1);
+    assert.equal(missingContextResult.stdout, "");
+    assert.match(missingContextResult.stderr, /No Repository Context selected/i);
+  } finally {
+    rmSync(cwd, { force: true, recursive: true });
+  }
+
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-label-clone-auth-"));
+
+  try {
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const authResult = await executeCli([
+      "label",
+      "clone",
+      "https://gitea.example.com/octo/source",
+      "-R",
+      "https://gitea.example.com/octo/destination"
+    ], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot,
+        APPDATA: configRoot
+      }
+    });
+
+    assert.equal(authResult.exitCode, 1);
+    assert.equal(authResult.stdout, "");
+    assert.match(authResult.stderr, /Could not read the native auth config/i);
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
   }
 });
 

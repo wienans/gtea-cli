@@ -16,6 +16,31 @@ export interface RepositoryLabelRecord extends StructuredObject {
   url: string | null;
 }
 
+export interface RepositoryLabelCloneCreateInput {
+  color: string;
+  description?: string;
+  name: string;
+}
+
+export interface RepositoryLabelCloneUpdateInput {
+  color: string;
+  description: string;
+  name: string;
+}
+
+export type RepositoryLabelClonePlanStep =
+  | {
+      action: "create";
+      currentName: string;
+      input: RepositoryLabelCloneCreateInput;
+    }
+  | {
+      action: "update";
+      currentName: string;
+      input: RepositoryLabelCloneUpdateInput;
+      labelId: number;
+    };
+
 export function mapRepositoryLabelRecord(
   payload: GiteaRepositoryLabelPayload | null | undefined
 ): RepositoryLabelRecord | null {
@@ -43,4 +68,53 @@ export function buildRepositoryLabelIdLookup(
       )
       .map((label) => [label.name, label.id])
   );
+}
+
+export function buildRepositoryLabelClonePlan(
+  sourceLabels: Array<GiteaRepositoryLabelPayload | null | undefined>,
+  destinationLabels: Array<GiteaRepositoryLabelPayload | null | undefined>,
+  options: { force: boolean }
+): RepositoryLabelClonePlanStep[] {
+  const destinationLabelLookup = buildRepositoryLabelIdLookup(destinationLabels);
+  const plan: RepositoryLabelClonePlanStep[] = [];
+
+  for (const sourceLabel of sourceLabels) {
+    const sourceRecord = mapRepositoryLabelRecord(sourceLabel);
+
+    if (sourceRecord?.name === null || sourceRecord?.name === undefined || sourceRecord.color === null) {
+      continue;
+    }
+
+    const destinationLabelId = destinationLabelLookup.get(sourceRecord.name);
+
+    if (destinationLabelId === undefined) {
+      plan.push({
+        action: "create",
+        currentName: sourceRecord.name,
+        input: {
+          name: sourceRecord.name,
+          color: sourceRecord.color,
+          ...(sourceRecord.description === null ? {} : { description: sourceRecord.description })
+        }
+      });
+      continue;
+    }
+
+    if (!options.force) {
+      continue;
+    }
+
+    plan.push({
+      action: "update",
+      currentName: sourceRecord.name,
+      labelId: destinationLabelId,
+      input: {
+        name: sourceRecord.name,
+        color: sourceRecord.color,
+        description: sourceRecord.description ?? ""
+      }
+    });
+  }
+
+  return plan;
 }
