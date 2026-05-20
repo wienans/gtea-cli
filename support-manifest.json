@@ -663,6 +663,17 @@
         "reason": "The supported label delete slice is already non-interactive, so --yes is accepted for gh compatibility."
       }
     ],
+    "labelCloneOptions": [
+      {
+        "name": "--force",
+        "aliases": [
+          "-f"
+        ],
+        "summary": "Replace existing destination labels with the source definition",
+        "status": "emulated",
+        "reason": "Plans Repository Label updates client-side because Gitea has no native clone-labels endpoint."
+      }
+    ],
     "issueListOptions": [
       {
         "name": "--app",
@@ -1981,8 +1992,12 @@
           "kind": "command",
           "name": "clone",
           "summary": "Clone Repository Labels from another repository",
-          "status": "unsupported",
-          "reason": "Repository Label clone lands in a later slice after the label surface and list command are in place."
+          "status": "emulated",
+          "reason": "Plans same-host Repository Label reads and deliberate create/update operations client-side because Gitea has no native clone-labels endpoint.",
+          "flagProfiles": [
+            "repositoryTarget",
+            "labelCloneOptions"
+          ]
         },
         {
           "kind": "command",

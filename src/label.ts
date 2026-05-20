@@ -9,6 +9,7 @@ import {
   type RepositoryContext
 } from "./repository-context.js";
 import {
+  buildRepositoryLabelClonePlan,
   buildRepositoryLabelIdLookup,
   mapRepositoryLabelRecord,
   type GiteaRepositoryLabelPayload as GiteaLabelPayload,
@@ -35,6 +36,12 @@ interface ParsedLabelEditFlags {
 interface ParsedLabelDeleteFlags {
   name?: string;
   repository?: string;
+}
+
+interface ParsedLabelCloneFlags {
+  force: boolean;
+  repository?: string;
+  sourceRepository?: string;
 }
 
 interface ParsedLabelListFlags {
@@ -70,7 +77,7 @@ function renderUnsupportedLabelFlag(subcommand: string, flag: string, reason: st
 function resolveRequiredLabelToken(
   hostname: string,
   context: ResolvedCliExecutionContext,
-  commandName: "create" | "edit" | "delete"
+  commandName: "clone" | "create" | "edit" | "delete"
 ): { token: string } | { error: CliResult } {
   return resolveRequiredTokenResult(hostname, context, {
     exitCode: 1,
@@ -551,6 +558,67 @@ function parseLabelDeleteFlags(args: string[]): { flags: ParsedLabelDeleteFlags;
   return { flags };
 }
 
+function parseLabelCloneFlags(args: string[]): { flags: ParsedLabelCloneFlags; error?: CliResult } {
+  const flags: ParsedLabelCloneFlags = {
+    force: false
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
+
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
+
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
+      continue;
+    }
+
+    if (token === "--force" || token === "-f") {
+      flags.force = true;
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    if (flags.sourceRepository === undefined) {
+      flags.sourceRepository = token;
+      continue;
+    }
+
+    return {
+      flags,
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Unexpected argument: ${token}\n`
+      }
+    };
+  }
+
+  return { flags };
+}
+
 function labelMutationActionLabel(commandName: "edit" | "delete"): "editing" | "deleting" {
   return commandName === "edit" ? "editing" : "deleting";
 }
@@ -757,6 +825,145 @@ async function readRepositoryLabelsForMutation(
       }
     };
   }
+}
+
+async function readRepositoryLabelsForClone(
+  repository: RepositoryContext,
+  token: string,
+  target: "destination" | "source"
+): Promise<{ labels?: GiteaLabelPayload[]; error?: CliResult }> {
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      headers: buildAuthorizationHeaders(token) ?? {}
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while reading ${target} labels for ${repository.owner}/${repository.repository} on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while reading ${target} labels for ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    const payload = await response.json();
+
+    if (!Array.isArray(payload)) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Failed to read ${target} labels for ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {
+      labels: payload as GiteaLabelPayload[]
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read ${target} labels for ${repository.owner}/${repository.repository} from ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function cloneRepositoryLabels(
+  sourceRepository: RepositoryContext,
+  destinationRepository: RepositoryContext,
+  options: { force: boolean },
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  if (sourceRepository.hostname !== destinationRepository.hostname) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `gtea label clone requires source and destination repositories to use the same Gitea Host. Source: ${sourceRepository.hostname}. Destination: ${destinationRepository.hostname}.\n`
+      }
+    };
+  }
+
+  const tokenResult = resolveRequiredLabelToken(destinationRepository.hostname, context, "clone");
+
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
+  }
+
+  const sourceLabelsResult = await readRepositoryLabelsForClone(sourceRepository, tokenResult.token, "source");
+
+  if (sourceLabelsResult.error !== undefined || sourceLabelsResult.labels === undefined) {
+    return {
+      error: sourceLabelsResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read source labels for ${sourceRepository.owner}/${sourceRepository.repository}.\n`
+      }
+    };
+  }
+
+  const destinationLabelsResult = await readRepositoryLabelsForClone(destinationRepository, tokenResult.token, "destination");
+
+  if (destinationLabelsResult.error !== undefined || destinationLabelsResult.labels === undefined) {
+    return {
+      error: destinationLabelsResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read destination labels for ${destinationRepository.owner}/${destinationRepository.repository}.\n`
+      }
+    };
+  }
+
+  const clonePlan = buildRepositoryLabelClonePlan(
+    sourceLabelsResult.labels,
+    destinationLabelsResult.labels,
+    options
+  );
+
+  for (const planStep of clonePlan) {
+    if (planStep.action === "create") {
+      const createResult = await createRepositoryLabel(destinationRepository, planStep.input, context);
+
+      if (createResult.error !== undefined) {
+        return createResult;
+      }
+
+      continue;
+    }
+
+    const editResult = await editRepositoryLabel(
+      destinationRepository,
+      planStep.labelId,
+      planStep.currentName,
+      planStep.input,
+      context
+    );
+
+    if (editResult.error !== undefined) {
+      return editResult;
+    }
+  }
+
+  return {};
 }
 
 async function createRepositoryLabel(
@@ -1088,6 +1295,61 @@ export async function executeLabelCommand(
     return undefined;
   }
 
+  if (args[1] === "clone") {
+    const parsedFlags = parseLabelCloneFlags(args.slice(2));
+
+    if (parsedFlags.error !== undefined) {
+      return parsedFlags.error;
+    }
+
+    if (parsedFlags.flags.sourceRepository === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Source repository is required.\n"
+      };
+    }
+
+    const sourceRepositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.sourceRepository, context);
+
+    if (sourceRepositoryResult.error !== undefined || sourceRepositoryResult.repository === undefined) {
+      return sourceRepositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Invalid source repository: ${parsedFlags.flags.sourceRepository}\n`
+      };
+    }
+
+    const destinationRepositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
+
+    if (destinationRepositoryResult.error !== undefined || destinationRepositoryResult.repository === undefined) {
+      return destinationRepositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const cloneResult = await cloneRepositoryLabels(
+      sourceRepositoryResult.repository,
+      destinationRepositoryResult.repository,
+      {
+        force: parsedFlags.flags.force
+      },
+      context
+    );
+
+    if (cloneResult.error !== undefined) {
+      return cloneResult.error;
+    }
+
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    };
+  }
+
   if (args[1] === "create") {
     const parsedFlags = parseLabelCreateFlags(args.slice(2));
 
@@ -1117,9 +1379,9 @@ export async function executeLabelCommand(
       return colorResult.error;
     }
 
-    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+    const repositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1128,7 +1390,7 @@ export async function executeLabelCommand(
     }
 
     const createResult = await createRepositoryLabel(
-      repositoryResult.target.repository,
+      repositoryResult.repository,
       {
         name: parsedFlags.flags.name,
         color: colorResult.color,
@@ -1187,9 +1449,9 @@ export async function executeLabelCommand(
       color = colorResult.color;
     }
 
-    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+    const repositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1197,34 +1459,24 @@ export async function executeLabelCommand(
       };
     }
 
-    const labelLookupResult = await readRepositoryLabelsForMutation(
-      repositoryResult.target.repository,
+    const labelIdResult = await resolveRepositoryLabelIdForMutation(
+      repositoryResult.repository,
       parsedFlags.flags.currentName,
       context,
       "edit"
     );
 
-    if (labelLookupResult.error !== undefined || labelLookupResult.labels === undefined) {
-      return labelLookupResult.error ?? {
+    if (labelIdResult.error !== undefined || labelIdResult.labelId === undefined) {
+      return labelIdResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: `Failed to resolve label "${parsedFlags.flags.currentName}".\n`
       };
     }
 
-    const labelId = buildRepositoryLabelIdLookup(labelLookupResult.labels).get(parsedFlags.flags.currentName);
-
-    if (labelId === undefined) {
-      return {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Validation failed while editing label "${parsedFlags.flags.currentName}" in ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}: label "${parsedFlags.flags.currentName}" was not found.\n`
-      };
-    }
-
     const editResult = await editRepositoryLabel(
-      repositoryResult.target.repository,
-      labelId,
+      repositoryResult.repository,
+      labelIdResult.labelId,
       parsedFlags.flags.currentName,
       {
         ...(parsedFlags.flags.newName === undefined ? {} : { name: parsedFlags.flags.newName }),
@@ -1260,9 +1512,9 @@ export async function executeLabelCommand(
       };
     }
 
-    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+    const repositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1270,34 +1522,24 @@ export async function executeLabelCommand(
       };
     }
 
-    const labelLookupResult = await readRepositoryLabelsForMutation(
-      repositoryResult.target.repository,
+    const labelIdResult = await resolveRepositoryLabelIdForMutation(
+      repositoryResult.repository,
       parsedFlags.flags.name,
       context,
       "delete"
     );
 
-    if (labelLookupResult.error !== undefined || labelLookupResult.labels === undefined) {
-      return labelLookupResult.error ?? {
+    if (labelIdResult.error !== undefined || labelIdResult.labelId === undefined) {
+      return labelIdResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: `Failed to resolve label "${parsedFlags.flags.name}".\n`
       };
     }
 
-    const labelId = buildRepositoryLabelIdLookup(labelLookupResult.labels).get(parsedFlags.flags.name);
-
-    if (labelId === undefined) {
-      return {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Validation failed while deleting label "${parsedFlags.flags.name}" in ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}: label "${parsedFlags.flags.name}" was not found.\n`
-      };
-    }
-
     const deleteResult = await deleteRepositoryLabel(
-      repositoryResult.target.repository,
-      labelId,
+      repositoryResult.repository,
+      labelIdResult.labelId,
       parsedFlags.flags.name,
       context
     );
@@ -1329,9 +1571,9 @@ export async function executeLabelCommand(
     return structuredFlagsError;
   }
 
-  const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+  const repositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
 
-  if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+  if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
     return repositoryResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -1339,13 +1581,13 @@ export async function executeLabelCommand(
     };
   }
 
-  const labelResult = await readRepositoryLabels(repositoryResult.target.repository, parsedFlags.flags, context);
+  const labelResult = await readRepositoryLabels(repositoryResult.repository, parsedFlags.flags, context);
 
   if (labelResult.error !== undefined || labelResult.labels === undefined) {
     return labelResult.error ?? {
       exitCode: 1,
       stdout: "",
-      stderr: `Failed to list labels for ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}.\n`
+      stderr: `Failed to list labels for ${repositoryResult.repository.owner}/${repositoryResult.repository.repository}.\n`
     };
   }
 
