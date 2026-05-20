@@ -1379,9 +1379,9 @@ export async function executeLabelCommand(
       return colorResult.error;
     }
 
-    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+    const repositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1390,7 +1390,7 @@ export async function executeLabelCommand(
     }
 
     const createResult = await createRepositoryLabel(
-      repositoryResult.target.repository,
+      repositoryResult.repository,
       {
         name: parsedFlags.flags.name,
         color: colorResult.color,
@@ -1449,9 +1449,9 @@ export async function executeLabelCommand(
       color = colorResult.color;
     }
 
-    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+    const repositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1459,34 +1459,24 @@ export async function executeLabelCommand(
       };
     }
 
-    const labelLookupResult = await readRepositoryLabelsForMutation(
-      repositoryResult.target.repository,
+    const labelIdResult = await resolveRepositoryLabelIdForMutation(
+      repositoryResult.repository,
       parsedFlags.flags.currentName,
       context,
       "edit"
     );
 
-    if (labelLookupResult.error !== undefined || labelLookupResult.labels === undefined) {
-      return labelLookupResult.error ?? {
+    if (labelIdResult.error !== undefined || labelIdResult.labelId === undefined) {
+      return labelIdResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: `Failed to resolve label "${parsedFlags.flags.currentName}".\n`
       };
     }
 
-    const labelId = buildRepositoryLabelIdLookup(labelLookupResult.labels).get(parsedFlags.flags.currentName);
-
-    if (labelId === undefined) {
-      return {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Validation failed while editing label "${parsedFlags.flags.currentName}" in ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}: label "${parsedFlags.flags.currentName}" was not found.\n`
-      };
-    }
-
     const editResult = await editRepositoryLabel(
-      repositoryResult.target.repository,
-      labelId,
+      repositoryResult.repository,
+      labelIdResult.labelId,
       parsedFlags.flags.currentName,
       {
         ...(parsedFlags.flags.newName === undefined ? {} : { name: parsedFlags.flags.newName }),
@@ -1522,9 +1512,9 @@ export async function executeLabelCommand(
       };
     }
 
-    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+    const repositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1532,34 +1522,24 @@ export async function executeLabelCommand(
       };
     }
 
-    const labelLookupResult = await readRepositoryLabelsForMutation(
-      repositoryResult.target.repository,
+    const labelIdResult = await resolveRepositoryLabelIdForMutation(
+      repositoryResult.repository,
       parsedFlags.flags.name,
       context,
       "delete"
     );
 
-    if (labelLookupResult.error !== undefined || labelLookupResult.labels === undefined) {
-      return labelLookupResult.error ?? {
+    if (labelIdResult.error !== undefined || labelIdResult.labelId === undefined) {
+      return labelIdResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: `Failed to resolve label "${parsedFlags.flags.name}".\n`
       };
     }
 
-    const labelId = buildRepositoryLabelIdLookup(labelLookupResult.labels).get(parsedFlags.flags.name);
-
-    if (labelId === undefined) {
-      return {
-        exitCode: 1,
-        stdout: "",
-        stderr: `Validation failed while deleting label "${parsedFlags.flags.name}" in ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}: label "${parsedFlags.flags.name}" was not found.\n`
-      };
-    }
-
     const deleteResult = await deleteRepositoryLabel(
-      repositoryResult.target.repository,
-      labelId,
+      repositoryResult.repository,
+      labelIdResult.labelId,
       parsedFlags.flags.name,
       context
     );
@@ -1591,9 +1571,9 @@ export async function executeLabelCommand(
     return structuredFlagsError;
   }
 
-  const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+  const repositoryResult = resolveLabelRepositoryTarget(parsedFlags.flags.repository, context);
 
-  if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+  if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
     return repositoryResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -1601,13 +1581,13 @@ export async function executeLabelCommand(
     };
   }
 
-  const labelResult = await readRepositoryLabels(repositoryResult.target.repository, parsedFlags.flags, context);
+  const labelResult = await readRepositoryLabels(repositoryResult.repository, parsedFlags.flags, context);
 
   if (labelResult.error !== undefined || labelResult.labels === undefined) {
     return labelResult.error ?? {
       exitCode: 1,
       stdout: "",
-      stderr: `Failed to list labels for ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}.\n`
+      stderr: `Failed to list labels for ${repositoryResult.repository.owner}/${repositoryResult.repository.repository}.\n`
     };
   }
 
