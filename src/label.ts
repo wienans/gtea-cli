@@ -5,7 +5,8 @@ import {
   preferOptionalTokenError,
   resolveOptionalTokenResult,
   resolveRepositoryCommandTarget,
-  resolveRequiredTokenResult
+  resolveRequiredTokenResult,
+  type RepositoryContext
 } from "./repository-context.js";
 import {
   buildRepositoryLabelIdLookup,
@@ -600,6 +601,27 @@ function validateStructuredLabelFlags(flags: ParsedLabelListFlags): CliResult | 
   return undefined;
 }
 
+function resolveLabelRepositoryTarget(
+  repositoryFlag: string | undefined,
+  context: ResolvedCliExecutionContext
+): { repository?: RepositoryContext; error?: CliResult } {
+  const repositoryResult = resolveRepositoryCommandTarget(repositoryFlag, { mode: "none" }, context);
+
+  if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+    return {
+      error: repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      }
+    };
+  }
+
+  return {
+    repository: repositoryResult.target.repository
+  };
+}
+
 async function readGiteaErrorMessage(response: Response): Promise<string | undefined> {
   try {
     const payload = await response.json() as { message?: string };
@@ -611,7 +633,7 @@ async function readGiteaErrorMessage(response: Response): Promise<string | undef
 }
 
 async function readRepositoryLabels(
-  repository: { hostname: string; owner: string; repository: string },
+  repository: RepositoryContext,
   flags: ParsedLabelListFlags,
   context: ResolvedCliExecutionContext
 ): Promise<{ labels?: LabelRecord[]; error?: CliResult }> {
@@ -670,7 +692,7 @@ async function readRepositoryLabels(
 }
 
 async function readRepositoryLabelsForMutation(
-  repository: { hostname: string; owner: string; repository: string },
+  repository: RepositoryContext,
   currentName: string,
   context: ResolvedCliExecutionContext,
   commandName: "edit" | "delete"
@@ -738,7 +760,7 @@ async function readRepositoryLabelsForMutation(
 }
 
 async function createRepositoryLabel(
-  repository: { hostname: string; owner: string; repository: string },
+  repository: RepositoryContext,
   input: { name: string; color: string; description?: string },
   context: ResolvedCliExecutionContext
 ): Promise<{ error?: CliResult }> {
@@ -813,7 +835,7 @@ async function createRepositoryLabel(
 }
 
 async function editRepositoryLabel(
-  repository: { hostname: string; owner: string; repository: string },
+  repository: RepositoryContext,
   labelId: number,
   currentName: string,
   input: { name?: string; color?: string; description?: string },
@@ -890,7 +912,7 @@ async function editRepositoryLabel(
 }
 
 async function deleteRepositoryLabel(
-  repository: { hostname: string; owner: string; repository: string },
+  repository: RepositoryContext,
   labelId: number,
   currentName: string,
   context: ResolvedCliExecutionContext
@@ -941,6 +963,39 @@ async function deleteRepositoryLabel(
       }
     };
   }
+}
+
+async function resolveRepositoryLabelIdForMutation(
+  repository: RepositoryContext,
+  currentName: string,
+  context: ResolvedCliExecutionContext,
+  commandName: "edit" | "delete"
+): Promise<{ labelId?: number; error?: CliResult }> {
+  const labelLookupResult = await readRepositoryLabelsForMutation(repository, currentName, context, commandName);
+
+  if (labelLookupResult.error !== undefined || labelLookupResult.labels === undefined) {
+    return {
+      error: labelLookupResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to resolve label "${currentName}".\n`
+      }
+    };
+  }
+
+  const labelId = buildRepositoryLabelIdLookup(labelLookupResult.labels).get(currentName);
+
+  if (labelId === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Validation failed while ${labelMutationActionLabel(commandName)} label "${currentName}" in ${repository.owner}/${repository.repository}: label "${currentName}" was not found.\n`
+      }
+    };
+  }
+
+  return { labelId };
 }
 
 function renderLabelList(labels: LabelRecord[]): string {
