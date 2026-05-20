@@ -27,9 +27,35 @@ test("root help shows the broad-first command groups", async () => {
   assert.match(result.stdout, /\bauth\b/);
   assert.match(result.stdout, /\bbrowse\b/);
   assert.match(result.stdout, /\bissue\b/);
+  assert.match(result.stdout, /\blabel\b/);
   assert.match(result.stdout, /\bpr\b/);
   assert.match(result.stdout, /\brelease\b/);
   assert.match(result.stdout, /\brepo\b/);
+});
+
+test("label help exposes the gh-shaped subcommand tree", async () => {
+  const result = await executeCli(["label", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /clone[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /create[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /delete[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /edit[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /list[\s\S]*\[supported\]/i);
+});
+
+test("label list help classifies supported and unsupported list flags and fields", async () => {
+  const result = await executeCli(["label", "list", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--repo, -R[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--limit, -L[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /--search, -S[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /--web, -w[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /color[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /createdAt[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /isDefault[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /url[\s\S]*\[supported\]/i);
 });
 
 test("repo view help classifies repository targeting and structured output flags", async () => {
@@ -62,6 +88,356 @@ test("repo admin help classifies supported, emulated, and unsupported flags", as
   assert.equal(renameHelp.exitCode, 0);
   assert.match(renameHelp.stdout, /--repo, -R[\s\S]*\[supported\]/i);
   assert.match(renameHelp.stdout, /--yes, -y[\s\S]*\[emulated\]/i);
+});
+
+test("label list requires a Repository Context when no repo is provided", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "gtea-label-context-"));
+
+  try {
+    const result = await executeCli(["label", "list"], { cwd });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /No Repository Context selected/i);
+  } finally {
+    rmSync(cwd, { force: true, recursive: true });
+  }
+});
+
+test("label list reads repository labels from the selected Gitea host", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/labels?limit=2") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          id: 1,
+          name: "bug",
+          description: "Something isn't working",
+          color: "d73a4a",
+          url: `http://127.0.0.1:${port}/api/v1/repos/octo/project/labels/1`
+        },
+        {
+          id: 2,
+          name: "blocked",
+          description: null,
+          color: "ff5451",
+          url: `http://127.0.0.1:${port}/api/v1/repos/octo/project/labels/2`
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "label",
+      "list",
+      "-R",
+      `http://127.0.0.1:${port}/octo/project`,
+      "--limit",
+      "2"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /NAME\s+DESCRIPTION\s+COLOR/);
+    assert.match(result.stdout, /bug\s+Something isn't working\s+#d73a4a/);
+    assert.match(result.stdout, /blocked\s+#ff5451/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("label list supports manifest-backed json output fields and tolerates partial payloads", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/labels") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          id: 1,
+          name: "bug",
+          description: "Something isn't working",
+          color: "d73a4a",
+          url: `http://127.0.0.1:${port}/api/v1/repos/octo/project/labels/1`
+        },
+        null,
+        {
+          id: 2,
+          color: "ff5451"
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "label",
+      "list",
+      "-R",
+      `http://127.0.0.1:${port}/octo/project`,
+      "--json",
+      "color,description,id,name,url"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(
+      result.stdout,
+      `${JSON.stringify([
+        {
+          color: "d73a4a",
+          description: "Something isn't working",
+          id: 1,
+          name: "bug",
+          url: `http://127.0.0.1:${port}/api/v1/repos/octo/project/labels/1`
+        },
+        {
+          color: "ff5451",
+          description: null,
+          id: 2,
+          name: null,
+          url: null
+        }
+      ], null, 2)}\n`
+    );
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("label list rejects unsupported web and search flags explicitly", async () => {
+  const webResult = await executeCli(["label", "list", "--web"]);
+
+  assert.equal(webResult.exitCode, 1);
+  assert.equal(webResult.stdout, "");
+  assert.equal(
+    webResult.stderr,
+    "gtea label list flag --web is currently unsupported: Browser label listings with gh-compatible filter propagation are not part of the supported label list slice.\n"
+  );
+
+  const searchResult = await executeCli(["label", "list", "--search", "bug"]);
+
+  assert.equal(searchResult.exitCode, 1);
+  assert.equal(searchResult.stdout, "");
+  assert.equal(
+    searchResult.stderr,
+    "gtea label list flag --search is currently unsupported: Gitea repository label lists do not expose a gh-compatible label search query.\n"
+  );
+});
+
+test("label list ignores an unreadable native auth config when -R selects the host explicitly", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-label-list-bad-config-"));
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/labels") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          id: 1,
+          name: "bug",
+          color: "d73a4a"
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const result = await executeCli(["label", "list", "-R", `127.0.0.1:${port}/octo/project`], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot,
+        APPDATA: configRoot
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /bug/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(configRoot, { force: true, recursive: true });
+  }
+});
+
+test("label list requires --json for helper flags and disallows combining jq with template", async () => {
+  const missingJsonJqResult = await executeCli([
+    "label",
+    "list",
+    "-R",
+    "https://example.com/octo/project",
+    "--jq",
+    ".[].name"
+  ]);
+
+  assert.equal(missingJsonJqResult.exitCode, 1);
+  assert.equal(missingJsonJqResult.stdout, "");
+  assert.equal(missingJsonJqResult.stderr, "--jq requires --json.\n");
+
+  const missingJsonTemplateResult = await executeCli([
+    "label",
+    "list",
+    "-R",
+    "https://example.com/octo/project",
+    "--template",
+    "{{.name}}"
+  ]);
+
+  assert.equal(missingJsonTemplateResult.exitCode, 1);
+  assert.equal(missingJsonTemplateResult.stdout, "");
+  assert.equal(missingJsonTemplateResult.stderr, "--template requires --json.\n");
+
+  const conflictingHelpersResult = await executeCli([
+    "label",
+    "list",
+    "-R",
+    "https://example.com/octo/project",
+    "--json",
+    "name",
+    "--jq",
+    ".[].name",
+    "--template",
+    "{{.name}}"
+  ]);
+
+  assert.equal(conflictingHelpersResult.exitCode, 1);
+  assert.equal(conflictingHelpersResult.stdout, "");
+  assert.equal(conflictingHelpersResult.stderr, "Choose at most one of --jq and --template.\n");
+});
+
+test("label list supports jq and template formatting on json output", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/api/v1/repos/octo/project/labels") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify([
+        {
+          id: 1,
+          name: "bug",
+          color: "d73a4a"
+        },
+        {
+          id: 2,
+          name: "blocked",
+          color: "ff5451"
+        }
+      ])
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const jqResult = await executeCli([
+      "label",
+      "list",
+      "-R",
+      `http://127.0.0.1:${port}/octo/project`,
+      "--json",
+      "name",
+      "--jq",
+      ".[].name"
+    ]);
+
+    assert.equal(jqResult.exitCode, 0);
+    assert.equal(jqResult.stdout, '"bug"\n"blocked"\n');
+    assert.equal(jqResult.stderr, "");
+
+    const templateResult = await executeCli([
+      "label",
+      "list",
+      "-R",
+      `http://127.0.0.1:${port}/octo/project`,
+      "--json",
+      "name,color",
+      "--template",
+      '{{range .}}{{.name}} {{.color}}{{"\\n"}}{{end}}'
+    ]);
+
+    assert.equal(templateResult.exitCode, 0);
+    assert.equal(templateResult.stdout, "bug d73a4a\nblocked ff5451\n");
+    assert.equal(templateResult.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
 });
 
 test("repo view reads a single repository from the selected Gitea host", async () => {

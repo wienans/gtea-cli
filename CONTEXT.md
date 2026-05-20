@@ -20,6 +20,10 @@ _Avoid_: backend, instance, remote service
 The repository a command targets after resolving `-R`, stored defaults, and the current Git directory.
 _Avoid_: active repo, selected repo, current repo
 
+**Repository Label**:
+A repository-scoped workflow marker that can be attached to issues and pull requests within one repository.
+_Avoid_: issue-only tag, global label
+
 **Host Credential**:
 The stored credential that authorizes `gtea` against one **Gitea Host**.
 _Avoid_: login state, session
@@ -93,6 +97,7 @@ _Avoid_: unit tests only, informal manual checks
 - A **Compatibility Matrix** classifies each **Script-Compatible Command** as supported, emulated, or unsupported.
 - A **Gitea Host** exposes one or more repositories that **Script-Compatible Commands** can target.
 - A **Repository Context** belongs to exactly one **Gitea Host**.
+- A **Repository Label** belongs to exactly one **Repository Context**.
 - A **Script-Compatible Command** operates against one **Repository Context** unless it is purely local.
 - A **Host Credential** authorizes `gtea` against exactly one **Gitea Host**.
 - A **Personal Access Token** is the default **Host Credential** for a **Gitea Host**.
@@ -112,6 +117,7 @@ _Avoid_: unit tests only, informal manual checks
 - The **Support Manifest** is scoped to a declared **Support Baseline**.
 - Features above the **Support Baseline** are gated rather than assumed.
 - Every targeted **Repository Context** must belong to an **Eligible Host**.
+- Issues and pull requests within a **Repository Context** may reference **Repository Labels**.
 - **Web Route Synthesis** derives browser targets from an **Eligible Host** and a **Repository Context**, preserving an explicit host scheme.
 - A **Broad-First Milestone** proves the cross-cutting pieces of the **Compatibility Matrix** before deep write coverage.
 - A **Fine-Grained Support Manifest** classifies command paths, flags, and output fields separately.
@@ -139,6 +145,7 @@ _Avoid_: unit tests only, informal manual checks
 - Interactive auth should not default to plain files when safer platform storage exists; resolved: `gtea` prefers a **Secure Credential Store** when available.
 - Public API docs may track newer development builds than the guaranteed floor; resolved: the first **Support Baseline** is `1.25.x`, and the live Gitea API reference can be fetched from https://gitea.com/api/swagger when checking current server capabilities.
 - `gtea` is not a generic forge client; resolved: commands only operate on an **Eligible Host** and fail clearly on GitHub targets.
+- "label" could be read as an issue-only concept; resolved: a **Repository Label** is repository-scoped and can be attached to both issues and pull requests.
 - Host transport was ambiguous between a fixed HTTPS assumption and a user choice; resolved: bare hostnames still default to HTTPS, but an explicit scheme becomes part of the **Gitea Host** identity and is preserved across auth, repository resolution, API calls, web routes, and Git credential setup.
 - Browser-facing commands should not depend on spotty API links; resolved: `gtea` uses **Web Route Synthesis** for `browse` and `--web` paths.
 - The first release should prove breadth before depth; resolved: the initial delivery is a **Broad-First Milestone**.

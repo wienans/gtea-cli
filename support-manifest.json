@@ -528,6 +528,77 @@
         ]
       }
     ],
+    "labelStructuredOutput": [
+      {
+        "name": "--json",
+        "summary": "Format output as JSON",
+        "status": "supported"
+      },
+      {
+        "name": "--jq",
+        "aliases": [
+          "-q"
+        ],
+        "summary": "Filter JSON output with jq syntax",
+        "status": "emulated",
+        "reason": "Implements the label list slice's supported jq field-path subset.",
+        "requires": [
+          "--json"
+        ]
+      },
+      {
+        "name": "--template",
+        "aliases": [
+          "-t"
+        ],
+        "summary": "Format JSON output with a Go template",
+        "status": "emulated",
+        "reason": "Implements the label list slice's supported field-interpolation template subset.",
+        "requires": [
+          "--json"
+        ]
+      }
+    ],
+    "labelListOptions": [
+      {
+        "name": "--limit",
+        "aliases": [
+          "-L"
+        ],
+        "summary": "Maximum number of labels to fetch",
+        "status": "supported"
+      },
+      {
+        "name": "--order",
+        "summary": "Order of labels returned",
+        "status": "unsupported",
+        "reason": "Gitea repository label lists do not expose gh-compatible sort order selection."
+      },
+      {
+        "name": "--search",
+        "aliases": [
+          "-S"
+        ],
+        "summary": "Search label names and descriptions",
+        "status": "unsupported",
+        "reason": "Gitea repository label lists do not expose a gh-compatible label search query."
+      },
+      {
+        "name": "--sort",
+        "summary": "Sort fetched labels",
+        "status": "unsupported",
+        "reason": "Gitea repository label lists do not expose gh-compatible label sort selection."
+      },
+      {
+        "name": "--web",
+        "aliases": [
+          "-w"
+        ],
+        "summary": "List labels in the web browser",
+        "status": "unsupported",
+        "reason": "Browser label listings with gh-compatible filter propagation are not part of the supported label list slice."
+      }
+    ],
     "issueListOptions": [
       {
         "name": "--app",
@@ -1386,6 +1457,51 @@
         "status": "supported"
       }
     ],
+    "labelListRead": [
+      {
+        "name": "color",
+        "summary": "Label color",
+        "status": "supported"
+      },
+      {
+        "name": "createdAt",
+        "summary": "Label creation timestamp",
+        "status": "unsupported",
+        "reason": "Gitea repository label payloads do not expose a compatible label creation timestamp."
+      },
+      {
+        "name": "description",
+        "summary": "Label description",
+        "status": "supported"
+      },
+      {
+        "name": "id",
+        "summary": "Label identifier",
+        "status": "supported"
+      },
+      {
+        "name": "isDefault",
+        "summary": "Whether the label is a default label",
+        "status": "unsupported",
+        "reason": "Gitea labels expose exclusivity and archival state, not GitHub's default-label flag."
+      },
+      {
+        "name": "name",
+        "summary": "Label name",
+        "status": "supported"
+      },
+      {
+        "name": "updatedAt",
+        "summary": "Label updated timestamp",
+        "status": "unsupported",
+        "reason": "Gitea repository label payloads do not expose a compatible label updated timestamp."
+      },
+      {
+        "name": "url",
+        "summary": "Label API URL",
+        "status": "supported"
+      }
+    ],
     "issueViewRead": [
       {
         "name": "assignees",
@@ -1787,6 +1903,56 @@
           "status": "supported",
           "flagProfiles": [
             "issueRepositoryTarget"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "group",
+      "name": "label",
+      "summary": "Work with Repository Labels",
+      "status": "supported",
+      "children": [
+        {
+          "kind": "command",
+          "name": "clone",
+          "summary": "Clone Repository Labels from another repository",
+          "status": "unsupported",
+          "reason": "Repository Label clone lands in a later slice after the label surface and list command are in place."
+        },
+        {
+          "kind": "command",
+          "name": "create",
+          "summary": "Create a Repository Label",
+          "status": "unsupported",
+          "reason": "Repository Label creation lands in a later write slice after the label surface and list command are in place."
+        },
+        {
+          "kind": "command",
+          "name": "delete",
+          "summary": "Delete a Repository Label",
+          "status": "unsupported",
+          "reason": "Repository Label deletion lands in a later write slice after the label surface and list command are in place."
+        },
+        {
+          "kind": "command",
+          "name": "edit",
+          "summary": "Edit a Repository Label",
+          "status": "unsupported",
+          "reason": "Repository Label editing lands in a later write slice after the label surface and list command are in place."
+        },
+        {
+          "kind": "command",
+          "name": "list",
+          "summary": "List Repository Labels",
+          "status": "supported",
+          "flagProfiles": [
+            "repositoryTarget",
+            "labelListOptions",
+            "labelStructuredOutput"
+          ],
+          "outputProfiles": [
+            "labelListRead"
           ]
         }
       ]
