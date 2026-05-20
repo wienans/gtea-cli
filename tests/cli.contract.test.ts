@@ -38,9 +38,9 @@ test("label help exposes the gh-shaped subcommand tree", async () => {
 
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /clone[\s\S]*\[unsupported\]/i);
-  assert.match(result.stdout, /create[\s\S]*\[unsupported\]/i);
-  assert.match(result.stdout, /delete[\s\S]*\[unsupported\]/i);
-  assert.match(result.stdout, /edit[\s\S]*\[unsupported\]/i);
+  assert.match(result.stdout, /create[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /delete[\s\S]*\[supported\]/i);
+  assert.match(result.stdout, /edit[\s\S]*\[supported\]/i);
   assert.match(result.stdout, /list[\s\S]*\[supported\]/i);
 });
 
@@ -56,6 +56,28 @@ test("label list help classifies supported and unsupported list flags and fields
   assert.match(result.stdout, /createdAt[\s\S]*\[unsupported\]/i);
   assert.match(result.stdout, /isDefault[\s\S]*\[unsupported\]/i);
   assert.match(result.stdout, /url[\s\S]*\[supported\]/i);
+});
+
+test("label write help classifies supported, emulated, and unsupported flags honestly", async () => {
+  const createHelp = await executeCli(["label", "create", "--help"]);
+  const editHelp = await executeCli(["label", "edit", "--help"]);
+  const deleteHelp = await executeCli(["label", "delete", "--help"]);
+
+  assert.equal(createHelp.exitCode, 0);
+  assert.match(createHelp.stdout, /--repo, -R[\s\S]*\[supported\]/i);
+  assert.match(createHelp.stdout, /--color, -c[\s\S]*\[supported\]/i);
+  assert.match(createHelp.stdout, /--description, -d[\s\S]*\[supported\]/i);
+  assert.match(createHelp.stdout, /--force, -f[\s\S]*\[unsupported\]/i);
+
+  assert.equal(editHelp.exitCode, 0);
+  assert.match(editHelp.stdout, /--repo, -R[\s\S]*\[supported\]/i);
+  assert.match(editHelp.stdout, /--name, -n[\s\S]*\[supported\]/i);
+  assert.match(editHelp.stdout, /--color, -c[\s\S]*\[supported\]/i);
+  assert.match(editHelp.stdout, /--description, -d[\s\S]*\[supported\]/i);
+
+  assert.equal(deleteHelp.exitCode, 0);
+  assert.match(deleteHelp.stdout, /--repo, -R[\s\S]*\[supported\]/i);
+  assert.match(deleteHelp.stdout, /--yes, -y[\s\S]*\[emulated\]/i);
 });
 
 test("repo view help classifies repository targeting and structured output flags", async () => {
@@ -437,6 +459,326 @@ test("label list supports jq and template formatting on json output", async () =
         resolve();
       })
     );
+  }
+});
+
+test("label create posts the selected label metadata to the Gitea host", async () => {
+  let port = 0;
+  let requestBody = "";
+
+  const server = createServer((request, response) => {
+    if (request.method !== "POST" || request.url !== "/api/v1/repos/octo/project/labels") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "not found" }));
+      return;
+    }
+
+    assert.equal(request.headers.authorization, "token label-create-token");
+
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      requestBody += chunk;
+    });
+    request.on("end", () => {
+      response.writeHead(201, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          id: 7,
+          name: "bug",
+          description: "Something isn't working",
+          color: "d73a4a"
+        })
+      );
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "label",
+      "create",
+      "bug",
+      "-R",
+      `http://127.0.0.1:${port}/octo/project`,
+      "--color",
+      "d73a4a",
+      "--description",
+      "Something isn't working"
+    ], {
+      env: {
+        GTEA_HOST: `http://127.0.0.1:${port}`,
+        GTEA_TOKEN: "label-create-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(requestBody), {
+      name: "bug",
+      color: "d73a4a",
+      description: "Something isn't working"
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("label edit resolves the selected Repository Label by name and patches it", async () => {
+  let port = 0;
+  let requestBody = "";
+
+  const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/labels") {
+      assert.equal(request.headers.authorization, "token label-edit-token");
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 7,
+            name: "bug",
+            description: "Something isn't working",
+            color: "d73a4a"
+          },
+          {
+            id: 8,
+            name: "docs",
+            description: "Documentation work",
+            color: "0075ca"
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.method === "PATCH" && request.url === "/api/v1/repos/octo/project/labels/7") {
+      assert.equal(request.headers.authorization, "token label-edit-token");
+
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        requestBody += chunk;
+      });
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            id: 7,
+            name: "defect",
+            description: "Updated description",
+            color: "ff5451"
+          })
+        );
+      });
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "label",
+      "edit",
+      "bug",
+      "-R",
+      `http://127.0.0.1:${port}/octo/project`,
+      "--name",
+      "defect",
+      "--color",
+      "ff5451",
+      "--description",
+      "Updated description"
+    ], {
+      env: {
+        GTEA_HOST: `http://127.0.0.1:${port}`,
+        GTEA_TOKEN: "label-edit-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+    assert.deepEqual(JSON.parse(requestBody), {
+      name: "defect",
+      color: "ff5451",
+      description: "Updated description"
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("label delete resolves the selected Repository Label by name and deletes it quietly", async () => {
+  let port = 0;
+
+  const server = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/api/v1/repos/octo/project/labels") {
+      assert.equal(request.headers.authorization, "token label-delete-token");
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 7,
+            name: "bug",
+            description: "Something isn't working",
+            color: "d73a4a"
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.method === "DELETE" && request.url === "/api/v1/repos/octo/project/labels/7") {
+      assert.equal(request.headers.authorization, "token label-delete-token");
+      response.writeHead(204).end();
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "label",
+      "delete",
+      "bug",
+      "-R",
+      `http://127.0.0.1:${port}/octo/project`,
+      "--yes"
+    ], {
+      env: {
+        GTEA_HOST: `http://127.0.0.1:${port}`,
+        GTEA_TOKEN: "label-delete-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("label create rejects invalid colors and explicit unsupported force semantics", async () => {
+  const invalidColorResult = await executeCli([
+    "label",
+    "create",
+    "bug",
+    "-R",
+    "https://example.com/octo/project",
+    "--color",
+    "oops"
+  ]);
+
+  assert.equal(invalidColorResult.exitCode, 1);
+  assert.equal(invalidColorResult.stdout, "");
+  assert.equal(
+    invalidColorResult.stderr,
+    "Invalid value for --color: oops. Expected a 6-digit hex label color.\n"
+  );
+
+  const forceResult = await executeCli([
+    "label",
+    "create",
+    "bug",
+    "-R",
+    "https://example.com/octo/project",
+    "--color",
+    "d73a4a",
+    "--force"
+  ]);
+
+  assert.equal(forceResult.exitCode, 1);
+  assert.equal(forceResult.stdout, "");
+  assert.equal(
+    forceResult.stderr,
+    "gtea label create flag --force is currently unsupported: Replacing an existing Repository Label during create is not part of the supported label write slice.\n"
+  );
+});
+
+test("label create surfaces direct Repository Context and Host Credential errors", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "gtea-label-create-context-"));
+  const missingContextResult = await executeCli([
+    "label",
+    "create",
+    "bug",
+    "--color",
+    "d73a4a"
+  ], {
+    cwd
+  });
+
+  assert.equal(missingContextResult.exitCode, 1);
+  assert.equal(missingContextResult.stdout, "");
+  assert.match(missingContextResult.stderr, /No Repository Context selected/i);
+  rmSync(cwd, { force: true, recursive: true });
+
+  const configRoot = mkdtempSync(join(tmpdir(), "gtea-label-create-auth-"));
+
+  try {
+    const configDirectory = join(configRoot, "gtea");
+    mkdirSync(configDirectory, { recursive: true });
+    writeFileSync(join(configDirectory, "config.json"), "{\n", "utf8");
+
+    const authResult = await executeCli([
+      "label",
+      "create",
+      "bug",
+      "-R",
+      "https://gitea.example.com/octo/project",
+      "--color",
+      "d73a4a"
+    ], {
+      env: {
+        HOME: configRoot,
+        XDG_CONFIG_HOME: configRoot,
+        APPDATA: configRoot
+      }
+    });
+
+    assert.equal(authResult.exitCode, 1);
+    assert.equal(authResult.stdout, "");
+    assert.match(authResult.stderr, /Could not read the native auth config/i);
+  } finally {
+    rmSync(configRoot, { force: true, recursive: true });
   }
 });
 

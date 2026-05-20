@@ -12,6 +12,7 @@ import {
   resolveRepositoryCommandTarget,
   resolveRequiredTokenResult
 } from "./repository-context.js";
+import { buildRepositoryLabelIdLookup, type GiteaRepositoryLabelPayload as GiteaLabelPayload } from "./repository-labels.js";
 import { renderStructuredJq, renderStructuredJson, renderStructuredTemplate, type StructuredObject } from "./structured-output.js";
 import { ManifestCommand, ManifestGroup, supportManifest } from "./support-manifest.js";
 
@@ -150,13 +151,6 @@ interface GiteaUserPayload {
   id?: number;
   login?: string;
   full_name?: string;
-}
-
-interface GiteaLabelPayload {
-  id?: number;
-  name?: string;
-  description?: string;
-  color?: string;
 }
 
 interface GiteaMilestonePayload {
@@ -2360,11 +2354,7 @@ async function planIssueEditMutations(
     flags.addLabels,
     flags.removeLabels
   );
-  const availableLabels = new Map(
-    labelResult.labels
-      .filter((label) => typeof label.name === "string" && label.name.length > 0 && typeof label.id === "number")
-      .map((label) => [label.name as string, label.id as number])
-  );
+  const availableLabels = buildRepositoryLabelIdLookup(labelResult.labels);
   const labelIds: number[] = [];
 
   for (const labelName of finalLabelNames) {
