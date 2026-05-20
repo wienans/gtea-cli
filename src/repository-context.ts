@@ -15,20 +15,277 @@ export interface RepositoryContext {
   repository: string;
 }
 
+export type CredentialResolutionPolicy =
+  | { mode: "none" }
+  | { mode: "optional" }
+  | { mode: "required"; missingCredentialError: CliResult };
+
+export type CredentialSource = "GTEA_TOKEN environment variable" | "GH_TOKEN environment variable" | "native config store";
+
+export interface ResolvedHostCredential {
+  token: string;
+  source: CredentialSource;
+}
+
+export interface ResolvedHostCommandTarget {
+  hostname: string;
+  credential?: ResolvedHostCredential;
+}
+
+export interface ResolvedRepositoryCommandTarget {
+  repository: RepositoryContext;
+  credential?: ResolvedHostCredential;
+}
+
 export interface ResolvedTokenResult {
   token?: string;
   error?: CliResult;
 }
 
 type RequiredTokenResult = { token: string } | { error: CliResult };
+type HostResolutionResult = { hostname?: string; error?: CliResult };
+type CredentialResolutionResult = { credential?: ResolvedHostCredential; error?: CliResult };
+type LoadedConfigResult = { config?: NativeAuthConfig; error?: CliResult };
 
-function resolveSelectedHost(context: ResolvedCliExecutionContext, config: NativeAuthConfig): string | undefined {
-  const envHost = parseHostname(context.env.GTEA_HOST) ?? parseHostname(context.env.GH_HOST);
+const noCredentialPolicy: CredentialResolutionPolicy = { mode: "none" };
+const optionalCredentialPolicy: CredentialResolutionPolicy = { mode: "optional" };
 
-  return envHost ?? config.activeHost ?? Object.keys(config.hosts).sort()[0];
+function parseProvidedHostname(rawValue: string | undefined, source: string): HostResolutionResult {
+  if (rawValue === undefined) {
+    return {};
+  }
+
+  const hostname = parseHostname(rawValue);
+
+  if (hostname === undefined) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Invalid value for ${source}: ${rawValue}\n`
+      }
+    };
+  }
+
+  return { hostname };
 }
 
-function parseRepositoryTarget(rawRepository: string, context: ResolvedCliExecutionContext): { repository?: RepositoryContext; error?: CliResult } {
+function resolveEnvironmentHost(
+  context: ResolvedCliExecutionContext,
+  options: { strict: boolean }
+): HostResolutionResult {
+  if (context.env.GTEA_HOST !== undefined) {
+    const resolvedHost = parseProvidedHostname(context.env.GTEA_HOST, "GTEA_HOST");
+
+    if (resolvedHost.hostname !== undefined || options.strict) {
+      return resolvedHost;
+    }
+  }
+
+  if (context.env.GH_HOST !== undefined) {
+    const resolvedHost = parseProvidedHostname(context.env.GH_HOST, "GH_HOST");
+
+    if (resolvedHost.hostname !== undefined || options.strict) {
+      return resolvedHost;
+    }
+  }
+
+  return {};
+}
+
+function resolveStoredHost(config: NativeAuthConfig): string | undefined {
+  return config.activeHost ?? Object.keys(config.hosts).sort()[0];
+}
+
+function loadConfig(context: ResolvedCliExecutionContext): LoadedConfigResult {
+  const config = loadNativeAuthConfig(context);
+
+  if (config.error !== undefined) {
+    return {
+      error: config.error
+    };
+  }
+
+  return { config };
+}
+
+function ensureEligibleHost(hostname: string): HostResolutionResult {
+  if (!isEligibleHost(hostname)) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Host ${hostname} is not an Eligible Host for gtea.\n`
+      }
+    };
+  }
+
+  return { hostname };
+}
+
+function resolveUnscopedEnvironmentCredential(context: ResolvedCliExecutionContext): ResolvedHostCredential | undefined {
+  if (context.env.GTEA_TOKEN !== undefined) {
+    return {
+      token: context.env.GTEA_TOKEN,
+      source: "GTEA_TOKEN environment variable"
+    };
+  }
+
+  if (context.env.GH_TOKEN !== undefined) {
+    return {
+      token: context.env.GH_TOKEN,
+      source: "GH_TOKEN environment variable"
+    };
+  }
+
+  return undefined;
+}
+
+function resolveScopedEnvironmentCredential(
+  hostname: string,
+  context: ResolvedCliExecutionContext
+): ResolvedHostCredential | undefined {
+  const envHost = parseHostname(context.env.GTEA_HOST) ?? parseHostname(context.env.GH_HOST);
+
+  if (envHost !== hostname) {
+    return undefined;
+  }
+
+  return resolveUnscopedEnvironmentCredential(context);
+}
+
+function resolveCredentialForHost(
+  hostname: string,
+  credentialPolicy: CredentialResolutionPolicy,
+  context: ResolvedCliExecutionContext,
+  options: { scopeEnvironmentTokenToHost: boolean },
+  config?: NativeAuthConfig
+): CredentialResolutionResult {
+  if (credentialPolicy.mode === "none") {
+    return {};
+  }
+
+  const environmentCredential = options.scopeEnvironmentTokenToHost
+    ? resolveScopedEnvironmentCredential(hostname, context)
+    : resolveUnscopedEnvironmentCredential(context);
+
+  if (environmentCredential !== undefined) {
+    return {
+      credential: environmentCredential
+    };
+  }
+
+  let resolvedConfig = config;
+
+  if (resolvedConfig === undefined) {
+    const configResult = loadConfig(context);
+
+    if (configResult.error !== undefined || configResult.config === undefined) {
+      return {
+        error: configResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: "Could not read the native auth config.\n"
+        }
+      };
+    }
+
+    resolvedConfig = configResult.config;
+  }
+
+  const storedToken = resolvedConfig.hosts[hostname]?.token;
+
+  if (storedToken === undefined) {
+    if (credentialPolicy.mode === "required") {
+      return {
+        error: credentialPolicy.missingCredentialError
+      };
+    }
+
+    return {};
+  }
+
+  return {
+    credential: {
+      token: storedToken,
+      source: "native config store"
+    }
+  };
+}
+
+function resolveSelectedHostForCommand(
+  explicitHostname: string | undefined,
+  context: ResolvedCliExecutionContext,
+  options: { explicitHostnameSource: string; strictEnvironmentHost: boolean; missingHostError: CliResult }
+): { hostname?: string; config?: NativeAuthConfig; error?: CliResult } {
+  const explicitHost = parseProvidedHostname(explicitHostname, options.explicitHostnameSource);
+
+  if (explicitHost.error !== undefined) {
+    return {
+      error: explicitHost.error
+    };
+  }
+
+  let hostname = explicitHost.hostname;
+
+  if (hostname === undefined) {
+    const environmentHost = resolveEnvironmentHost(context, {
+      strict: options.strictEnvironmentHost
+    });
+
+    if (environmentHost.error !== undefined) {
+      return {
+        error: environmentHost.error
+      };
+    }
+
+    hostname = environmentHost.hostname;
+  }
+
+  let config: NativeAuthConfig | undefined;
+
+  if (hostname === undefined) {
+    const configResult = loadConfig(context);
+
+    if (configResult.error !== undefined || configResult.config === undefined) {
+      return {
+        error: configResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: "Could not read the native auth config.\n"
+        }
+      };
+    }
+
+    config = configResult.config;
+    hostname = resolveStoredHost(config);
+  }
+
+  if (hostname === undefined) {
+    return {
+      error: options.missingHostError,
+      ...(config === undefined ? {} : { config })
+    };
+  }
+
+  const eligibleHost = ensureEligibleHost(hostname);
+
+  if (eligibleHost.error !== undefined) {
+    return {
+      error: eligibleHost.error,
+      ...(config === undefined ? {} : { config })
+    };
+  }
+
+  return {
+    hostname,
+    ...(config === undefined ? {} : { config })
+  };
+}
+
+function parseRepositoryTargetParts(
+  rawRepository: string
+): { owner?: string; repository?: string; explicitHost?: string; error?: CliResult } {
   const segments = rawRepository.split("/");
 
   if (segments.length < 2) {
@@ -56,45 +313,52 @@ function parseRepositoryTarget(rawRepository: string, context: ResolvedCliExecut
     };
   }
 
-  let hostname = parseHostname(explicitHost);
+  return {
+    owner,
+    repository: repository.replace(/\.git$/i, ""),
+    ...(explicitHost === undefined ? {} : { explicitHost })
+  };
+}
 
-  if (explicitHost === undefined) {
-    const config = loadNativeAuthConfig(context);
+function parseRepositoryTarget(rawRepository: string, context: ResolvedCliExecutionContext): { repository?: RepositoryContext; error?: CliResult } {
+  const repositoryTargetParts = parseRepositoryTargetParts(rawRepository);
 
-    if (config.error !== undefined) {
-      return {
-        error: config.error
-      };
-    }
-
-    hostname = resolveSelectedHost(context, config);
-  }
-
-  if (hostname === undefined) {
+  if (repositoryTargetParts.error !== undefined) {
     return {
-      error: {
-        exitCode: 1,
-        stdout: "",
-        stderr: "No Gitea Host selected. Pass -R HOST/OWNER/REPO or set GTEA_HOST/GH_HOST.\n"
-      }
+      error: repositoryTargetParts.error
     };
   }
 
-  if (!isEligibleHost(hostname)) {
+  const selectedHostResult = resolveSelectedHostForCommand(repositoryTargetParts.explicitHost, context, {
+    explicitHostnameSource: "-R",
+    strictEnvironmentHost: false,
+    missingHostError: {
+      exitCode: 1,
+      stdout: "",
+      stderr: "No Gitea Host selected. Pass -R HOST/OWNER/REPO or set GTEA_HOST/GH_HOST.\n"
+    }
+  });
+
+  if (
+    selectedHostResult.error !== undefined
+    || selectedHostResult.hostname === undefined
+    || repositoryTargetParts.owner === undefined
+    || repositoryTargetParts.repository === undefined
+  ) {
     return {
-      error: {
+      error: selectedHostResult.error ?? {
         exitCode: 1,
         stdout: "",
-        stderr: `Host ${hostname} is not an Eligible Host for gtea.\n`
+        stderr: `Invalid value for -R: ${rawRepository}\n`
       }
     };
   }
 
   return {
     repository: {
-      hostname,
-      owner,
-      repository: repository.replace(/\.git$/i, "")
+      hostname: selectedHostResult.hostname,
+      owner: repositoryTargetParts.owner,
+      repository: repositoryTargetParts.repository
     }
   };
 }
@@ -197,37 +461,162 @@ export function resolveRepositoryContext(
   rawRepository: string | undefined,
   context: ResolvedCliExecutionContext
 ): { repository?: RepositoryContext; error?: CliResult } {
-  if (rawRepository !== undefined) {
-    return parseRepositoryTarget(rawRepository, context);
+  const repositoryTarget = resolveRepositoryCommandTarget(rawRepository, noCredentialPolicy, context);
+
+  if (repositoryTarget.error !== undefined || repositoryTarget.target === undefined) {
+    return {
+      error: repositoryTarget.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      }
+    };
   }
 
-  return resolveRepositoryFromGit(context);
+  return {
+    repository: repositoryTarget.target.repository
+  };
+}
+
+export function resolveHostCommandTarget(
+  rawHostname: string | undefined,
+  credentialPolicy: CredentialResolutionPolicy,
+  context: ResolvedCliExecutionContext,
+  explicitHostnameSource = "--hostname"
+): { target?: ResolvedHostCommandTarget; error?: CliResult } {
+  const selectedHostResult = resolveSelectedHostForCommand(rawHostname, context, {
+    explicitHostnameSource,
+    strictEnvironmentHost: true,
+    missingHostError: {
+      exitCode: 1,
+      stdout: "",
+      stderr: "No Gitea Host selected. Pass --hostname or set GTEA_HOST/GH_HOST.\n"
+    }
+  });
+
+  if (selectedHostResult.error !== undefined || selectedHostResult.hostname === undefined) {
+    return {
+      error: selectedHostResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Gitea Host selected.\n"
+      }
+    };
+  }
+
+  const credentialResult = resolveCredentialForHost(
+    selectedHostResult.hostname,
+    credentialPolicy,
+    context,
+    { scopeEnvironmentTokenToHost: false },
+    selectedHostResult.config
+  );
+
+  if (credentialResult.error !== undefined) {
+    return {
+      error: credentialResult.error
+    };
+  }
+
+  return {
+    target: {
+      hostname: selectedHostResult.hostname,
+      ...(credentialResult.credential === undefined ? {} : { credential: credentialResult.credential })
+    }
+  };
+}
+
+export function resolveRepositoryCommandTarget(
+  rawRepository: string | undefined,
+  credentialPolicy: CredentialResolutionPolicy,
+  context: ResolvedCliExecutionContext
+): { target?: ResolvedRepositoryCommandTarget; error?: CliResult } {
+  if (rawRepository !== undefined) {
+    const repositoryResult = parseRepositoryTarget(rawRepository, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+      return {
+        error: repositoryResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Invalid value for -R: ${rawRepository}\n`
+        }
+      };
+    }
+
+    const credentialResult = resolveCredentialForHost(
+      repositoryResult.repository.hostname,
+      credentialPolicy,
+      context,
+      { scopeEnvironmentTokenToHost: true }
+    );
+
+    if (credentialResult.error !== undefined) {
+      return {
+        error: credentialResult.error
+      };
+    }
+
+    return {
+      target: {
+        repository: repositoryResult.repository,
+        ...(credentialResult.credential === undefined ? {} : { credential: credentialResult.credential })
+      }
+    };
+  }
+
+  const repositoryResult = resolveRepositoryFromGit(context);
+
+  if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    return {
+      error: repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected. Pass -R or run from a Git repository.\n"
+      }
+    };
+  }
+
+  const credentialResult = resolveCredentialForHost(
+    repositoryResult.repository.hostname,
+    credentialPolicy,
+    context,
+    { scopeEnvironmentTokenToHost: true }
+  );
+
+  if (credentialResult.error !== undefined) {
+    return {
+      error: credentialResult.error
+    };
+  }
+
+  return {
+    target: {
+      repository: repositoryResult.repository,
+      ...(credentialResult.credential === undefined ? {} : { credential: credentialResult.credential })
+    }
+  };
 }
 
 export function resolveOptionalTokenResult(
   hostname: string,
   context: ResolvedCliExecutionContext
 ): ResolvedTokenResult {
-  const envHost = parseHostname(context.env.GTEA_HOST) ?? parseHostname(context.env.GH_HOST);
+  const credentialResult = resolveCredentialForHost(
+    hostname,
+    optionalCredentialPolicy,
+    context,
+    { scopeEnvironmentTokenToHost: true }
+  );
 
-  if (envHost === hostname) {
-    const envToken = context.env.GTEA_TOKEN ?? context.env.GH_TOKEN;
-
+  if (credentialResult.error !== undefined) {
     return {
-      ...(envToken === undefined ? {} : { token: envToken })
-    };
-  }
-
-  const nativeConfig = loadNativeAuthConfig(context);
-
-  if (nativeConfig.error !== undefined) {
-    return {
-      error: nativeConfig.error
+      error: credentialResult.error
     };
   }
 
   return {
-    ...(nativeConfig.hosts[hostname]?.token === undefined ? {} : { token: nativeConfig.hosts[hostname]?.token })
+    ...(credentialResult.credential === undefined ? {} : { token: credentialResult.credential.token })
   };
 }
 
@@ -236,21 +625,29 @@ export function resolveRequiredTokenResult(
   context: ResolvedCliExecutionContext,
   missingCredentialError: CliResult
 ): RequiredTokenResult {
-  const tokenResult = resolveOptionalTokenResult(hostname, context);
+  const credentialResult = resolveCredentialForHost(
+    hostname,
+    {
+      mode: "required",
+      missingCredentialError
+    },
+    context,
+    { scopeEnvironmentTokenToHost: true }
+  );
 
-  if (tokenResult.error !== undefined) {
+  if (credentialResult.error !== undefined) {
     return {
-      error: tokenResult.error
+      error: credentialResult.error
     };
   }
 
-  if (tokenResult.token === undefined) {
+  if (credentialResult.credential === undefined) {
     return {
       error: missingCredentialError
     };
   }
 
-  return { token: tokenResult.token };
+  return { token: credentialResult.credential.token };
 }
 
 export function buildAuthorizationHeaders(token: string): Record<string, string>;

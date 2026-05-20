@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 
 import { CliResult, ResolvedCliExecutionContext } from "./cli-runtime.js";
 import { buildHostBaseUrl, buildProcessEnv } from "./host-config.js";
-import { type RepositoryContext, resolveRepositoryContext } from "./repository-context.js";
+import { type RepositoryContext, resolveRepositoryCommandTarget } from "./repository-context.js";
 
 interface ParsedBrowseFlags {
   noBrowser: boolean;
@@ -275,9 +275,9 @@ export function executeBrowseCommand(args: string[], context: ResolvedCliExecuti
     return parsedFlags.error;
   }
 
-  const repositoryTarget = resolveRepositoryContext(parsedFlags.flags.repository, context);
+  const repositoryTarget = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
 
-  if (repositoryTarget.error !== undefined || repositoryTarget.repository === undefined) {
+  if (repositoryTarget.error !== undefined || repositoryTarget.target === undefined) {
     return repositoryTarget.error ?? {
       exitCode: 1,
       stdout: "",
@@ -285,7 +285,7 @@ export function executeBrowseCommand(args: string[], context: ResolvedCliExecuti
     };
   }
 
-  const browseUrl = synthesizeBrowseUrl(repositoryTarget.repository, parsedFlags.flags, context);
+  const browseUrl = synthesizeBrowseUrl(repositoryTarget.target.repository, parsedFlags.flags, context);
 
   if (browseUrl.error !== undefined || browseUrl.url === undefined) {
     return browseUrl.error ?? {

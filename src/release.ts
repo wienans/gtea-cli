@@ -8,7 +8,7 @@ import {
   preferOptionalTokenError,
   type RepositoryContext,
   resolveOptionalTokenResult,
-  resolveRepositoryContext,
+  resolveRepositoryCommandTarget,
   resolveRequiredTokenResult
 } from "./repository-context.js";
 import {
@@ -1812,9 +1812,9 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
       return notesInputResult.error;
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedCreateFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedCreateFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1823,7 +1823,7 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
     }
 
     const createResult = await createRelease(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       {
         tagName: parsedCreateFlags.flags.tag,
         ...(parsedCreateFlags.flags.title === undefined ? {} : { title: parsedCreateFlags.flags.title }),
@@ -1871,9 +1871,9 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
       return notesInputResult.error;
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedEditFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedEditFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1882,7 +1882,7 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
     }
 
     const targetResult = await resolveReleaseMutationTarget(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedEditFlags.flags.tag,
       context
     );
@@ -1896,7 +1896,7 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
     }
 
     const editResult = await editRelease(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       targetResult.releaseId,
       {
         ...(parsedEditFlags.flags.title === undefined ? {} : { title: parsedEditFlags.flags.title }),
@@ -1939,9 +1939,9 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedDeleteFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedDeleteFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -1950,7 +1950,7 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
     }
 
     const targetResult = await resolveReleaseMutationTarget(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedDeleteFlags.flags.tag,
       context
     );
@@ -1963,7 +1963,7 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
       };
     }
 
-    const deleteResult = await deleteRelease(repositoryResult.repository, targetResult.releaseId, context);
+    const deleteResult = await deleteRelease(repositoryResult.target.repository, targetResult.releaseId, context);
 
     if (deleteResult.error !== undefined) {
       return deleteResult.error;
@@ -1999,9 +1999,9 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
       };
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedUploadFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedUploadFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -2010,7 +2010,7 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
     }
 
     const targetResult = await resolveReleaseMutationTarget(
-      repositoryResult.repository,
+      repositoryResult.target.repository,
       parsedUploadFlags.flags.tag,
       context
     );
@@ -2025,7 +2025,7 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
 
     for (const filePath of parsedUploadFlags.flags.files) {
       const uploadResult = await uploadReleaseAsset(
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         targetResult.releaseId,
         filePath,
         context
@@ -2050,9 +2050,9 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
       return parsedDownloadFlags.error;
     }
 
-    const repositoryResult = resolveRepositoryContext(parsedDownloadFlags.flags.repository, context);
+    const repositoryResult = resolveRepositoryCommandTarget(parsedDownloadFlags.flags.repository, { mode: "none" }, context);
 
-    if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+    if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
       return repositoryResult.error ?? {
         exitCode: 1,
         stdout: "",
@@ -2061,15 +2061,15 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
     }
 
     const releaseResult = parsedDownloadFlags.flags.tag === undefined
-      ? await readLatestRelease(repositoryResult.repository, context)
-      : await readReleaseByTag(repositoryResult.repository, parsedDownloadFlags.flags.tag, context);
+      ? await readLatestRelease(repositoryResult.target.repository, context)
+      : await readReleaseByTag(repositoryResult.target.repository, parsedDownloadFlags.flags.tag, context);
 
     if (releaseResult.error !== undefined || releaseResult.release === undefined) {
       return releaseResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: parsedDownloadFlags.flags.tag === undefined
-          ? `Failed to read the latest release for ${repositoryResult.repository.owner}/${repositoryResult.repository.repository}.\n`
+          ? `Failed to read the latest release for ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}.\n`
           : `Failed to read release ${parsedDownloadFlags.flags.tag}.\n`
       };
     }
@@ -2092,7 +2092,7 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
       const downloadResult = await downloadReleaseAsset(
         asset,
         destinationDirectory,
-        repositoryResult.repository,
+        repositoryResult.target.repository,
         context
       );
 
@@ -2120,9 +2120,9 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
     return structuredFlagsError;
   }
 
-  const repositoryResult = resolveRepositoryContext(flags.repository, context);
+  const repositoryResult = resolveRepositoryCommandTarget(flags.repository, { mode: "none" }, context);
 
-  if (repositoryResult.error !== undefined || repositoryResult.repository === undefined) {
+  if (repositoryResult.error !== undefined || repositoryResult.target === undefined) {
     return repositoryResult.error ?? {
       exitCode: 1,
       stdout: "",
@@ -2132,15 +2132,15 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
 
   if (subcommand === "view") {
     const releaseResult = flags.tag === undefined
-      ? await readLatestRelease(repositoryResult.repository, context)
-      : await readReleaseByTag(repositoryResult.repository, flags.tag, context);
+      ? await readLatestRelease(repositoryResult.target.repository, context)
+      : await readReleaseByTag(repositoryResult.target.repository, flags.tag, context);
 
     if (releaseResult.error !== undefined || releaseResult.release === undefined) {
       return releaseResult.error ?? {
         exitCode: 1,
         stdout: "",
         stderr: flags.tag === undefined
-          ? `Failed to read the latest release for ${repositoryResult.repository.owner}/${repositoryResult.repository.repository}.\n`
+          ? `Failed to read the latest release for ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}.\n`
           : `Failed to read release ${flags.tag}.\n`
       };
     }
@@ -2172,13 +2172,13 @@ export async function executeReleaseCommand(args: string[], context: ResolvedCli
     };
   }
 
-  const releaseListResult = await readReleaseList(repositoryResult.repository, context);
+  const releaseListResult = await readReleaseList(repositoryResult.target.repository, context);
 
   if (releaseListResult.error !== undefined || releaseListResult.releases === undefined) {
     return releaseListResult.error ?? {
       exitCode: 1,
       stdout: "",
-      stderr: `Failed to read releases for ${repositoryResult.repository.owner}/${repositoryResult.repository.repository}.\n`
+      stderr: `Failed to read releases for ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}.\n`
     };
   }
 
