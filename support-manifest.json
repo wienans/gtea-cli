@@ -599,6 +599,70 @@
         "reason": "Browser label listings with gh-compatible filter propagation are not part of the supported label list slice."
       }
     ],
+    "labelCreateOptions": [
+      {
+        "name": "--color",
+        "aliases": [
+          "-c"
+        ],
+        "summary": "Supply the label color as a 6-digit hex value",
+        "status": "supported"
+      },
+      {
+        "name": "--description",
+        "aliases": [
+          "-d"
+        ],
+        "summary": "Supply the label description",
+        "status": "supported"
+      },
+      {
+        "name": "--force",
+        "aliases": [
+          "-f"
+        ],
+        "summary": "Replace an existing label of the same name",
+        "status": "unsupported",
+        "reason": "Replacing an existing Repository Label during create is not part of the supported label write slice."
+      }
+    ],
+    "labelEditOptions": [
+      {
+        "name": "--name",
+        "aliases": [
+          "-n"
+        ],
+        "summary": "Rename the Repository Label",
+        "status": "supported"
+      },
+      {
+        "name": "--color",
+        "aliases": [
+          "-c"
+        ],
+        "summary": "Update the label color with a 6-digit hex value",
+        "status": "supported"
+      },
+      {
+        "name": "--description",
+        "aliases": [
+          "-d"
+        ],
+        "summary": "Update the label description",
+        "status": "supported"
+      }
+    ],
+    "labelDeleteOptions": [
+      {
+        "name": "--yes",
+        "aliases": [
+          "-y"
+        ],
+        "summary": "Skip the confirmation prompt",
+        "status": "emulated",
+        "reason": "The supported label delete slice is already non-interactive, so --yes is accepted for gh compatibility."
+      }
+    ],
     "issueListOptions": [
       {
         "name": "--app",
@@ -1924,22 +1988,31 @@
           "kind": "command",
           "name": "create",
           "summary": "Create a Repository Label",
-          "status": "unsupported",
-          "reason": "Repository Label creation lands in a later write slice after the label surface and list command are in place."
+          "status": "supported",
+          "flagProfiles": [
+            "repositoryTarget",
+            "labelCreateOptions"
+          ]
         },
         {
           "kind": "command",
           "name": "delete",
           "summary": "Delete a Repository Label",
-          "status": "unsupported",
-          "reason": "Repository Label deletion lands in a later write slice after the label surface and list command are in place."
+          "status": "supported",
+          "flagProfiles": [
+            "repositoryTarget",
+            "labelDeleteOptions"
+          ]
         },
         {
           "kind": "command",
           "name": "edit",
           "summary": "Edit a Repository Label",
-          "status": "unsupported",
-          "reason": "Repository Label editing lands in a later write slice after the label surface and list command are in place."
+          "status": "supported",
+          "flagProfiles": [
+            "repositoryTarget",
+            "labelEditOptions"
+          ]
         },
         {
           "kind": "command",

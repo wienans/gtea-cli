@@ -4,10 +4,37 @@ import {
   buildAuthorizationHeaders,
   preferOptionalTokenError,
   resolveOptionalTokenResult,
-  resolveRepositoryCommandTarget
+  resolveRepositoryCommandTarget,
+  resolveRequiredTokenResult
 } from "./repository-context.js";
+import {
+  buildRepositoryLabelIdLookup,
+  mapRepositoryLabelRecord,
+  type GiteaRepositoryLabelPayload as GiteaLabelPayload,
+  type RepositoryLabelRecord as LabelRecord
+} from "./repository-labels.js";
 import { renderStructuredJq, renderStructuredJson, renderStructuredTemplate, type StructuredObject } from "./structured-output.js";
 import { ManifestCommand, ManifestGroup, supportManifest } from "./support-manifest.js";
+
+interface ParsedLabelCreateFlags {
+  color?: string;
+  description?: string;
+  name?: string;
+  repository?: string;
+}
+
+interface ParsedLabelEditFlags {
+  color?: string;
+  currentName?: string;
+  description?: string;
+  newName?: string;
+  repository?: string;
+}
+
+interface ParsedLabelDeleteFlags {
+  name?: string;
+  repository?: string;
+}
 
 interface ParsedLabelListFlags {
   repository?: string;
@@ -15,22 +42,6 @@ interface ParsedLabelListFlags {
   jsonFields?: string[];
   jqExpression?: string;
   template?: string;
-}
-
-interface LabelRecord extends StructuredObject {
-  color: string | null;
-  description: string | null;
-  id: number | null;
-  name: string | null;
-  url: string | null;
-}
-
-interface GiteaLabelPayload {
-  color?: string | null;
-  description?: string | null;
-  id?: number;
-  name?: string | null;
-  url?: string | null;
 }
 
 const labelGroup = supportManifest.children.find(
@@ -47,12 +58,24 @@ const labelListOutputFields = new Set(
     .map((field) => field.name)
 );
 
-function renderUnsupportedLabelFlag(flag: string, reason: string): CliResult {
+function renderUnsupportedLabelFlag(subcommand: string, flag: string, reason: string): CliResult {
   return {
     exitCode: 1,
     stdout: "",
-    stderr: `${supportManifest.cliName} label list flag ${flag} is currently unsupported: ${reason}\n`
+    stderr: `${supportManifest.cliName} label ${subcommand} flag ${flag} is currently unsupported: ${reason}\n`
   };
+}
+
+function resolveRequiredLabelToken(
+  hostname: string,
+  context: ResolvedCliExecutionContext,
+  commandName: "create" | "edit" | "delete"
+): { token: string } | { error: CliResult } {
+  return resolveRequiredTokenResult(hostname, context, {
+    exitCode: 1,
+    stdout: "",
+    stderr: `gtea label ${commandName} requires an authenticated host credential. Run gtea auth login or set GTEA_TOKEN/GH_TOKEN.\n`
+  });
 }
 
 function parseStringFlagValue(
@@ -244,7 +267,7 @@ function parseLabelListFlags(args: string[]): { flags: ParsedLabelListFlags; err
       if (unsupportedValue.handled) {
         return {
           flags,
-          error: renderUnsupportedLabelFlag(unsupportedFlag.long, unsupportedFlag.reason)
+          error: renderUnsupportedLabelFlag("list", unsupportedFlag.long, unsupportedFlag.reason)
         };
       }
     }
@@ -253,6 +276,7 @@ function parseLabelListFlags(args: string[]): { flags: ParsedLabelListFlags; err
       return {
         flags,
         error: renderUnsupportedLabelFlag(
+          "list",
           "--web",
           "Browser label listings with gh-compatible filter propagation are not part of the supported label list slice."
         )
@@ -272,6 +296,280 @@ function parseLabelListFlags(args: string[]): { flags: ParsedLabelListFlags; err
   }
 
   return { flags };
+}
+
+function parseLabelCreateFlags(args: string[]): { flags: ParsedLabelCreateFlags; error?: CliResult } {
+  const flags: ParsedLabelCreateFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
+
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
+
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
+      continue;
+    }
+
+    const colorFlag = parseStringFlagValue(args, index, { long: "--color", short: "-c" });
+
+    if (colorFlag.error !== undefined) {
+      return {
+        flags,
+        error: colorFlag.error
+      };
+    }
+
+    if (colorFlag.handled && colorFlag.value !== undefined) {
+      flags.color = colorFlag.value;
+      index = colorFlag.nextIndex;
+      continue;
+    }
+
+    const descriptionFlag = parseStringFlagValue(args, index, { long: "--description", short: "-d" });
+
+    if (descriptionFlag.error !== undefined) {
+      return {
+        flags,
+        error: descriptionFlag.error
+      };
+    }
+
+    if (descriptionFlag.handled && descriptionFlag.value !== undefined) {
+      flags.description = descriptionFlag.value;
+      index = descriptionFlag.nextIndex;
+      continue;
+    }
+
+    if (token === "--force" || token === "-f") {
+      return {
+        flags,
+        error: renderUnsupportedLabelFlag(
+          "create",
+          "--force",
+          "Replacing an existing Repository Label during create is not part of the supported label write slice."
+        )
+      };
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    if (flags.name === undefined) {
+      flags.name = token;
+      continue;
+    }
+
+    return {
+      flags,
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Unexpected argument: ${token}\n`
+      }
+    };
+  }
+
+  return { flags };
+}
+
+function parseLabelEditFlags(args: string[]): { flags: ParsedLabelEditFlags; error?: CliResult } {
+  const flags: ParsedLabelEditFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
+
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
+
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
+      continue;
+    }
+
+    const nameFlag = parseStringFlagValue(args, index, { long: "--name", short: "-n" });
+
+    if (nameFlag.error !== undefined) {
+      return {
+        flags,
+        error: nameFlag.error
+      };
+    }
+
+    if (nameFlag.handled && nameFlag.value !== undefined) {
+      flags.newName = nameFlag.value;
+      index = nameFlag.nextIndex;
+      continue;
+    }
+
+    const colorFlag = parseStringFlagValue(args, index, { long: "--color", short: "-c" });
+
+    if (colorFlag.error !== undefined) {
+      return {
+        flags,
+        error: colorFlag.error
+      };
+    }
+
+    if (colorFlag.handled && colorFlag.value !== undefined) {
+      flags.color = colorFlag.value;
+      index = colorFlag.nextIndex;
+      continue;
+    }
+
+    const descriptionFlag = parseStringFlagValue(args, index, { long: "--description", short: "-d" });
+
+    if (descriptionFlag.error !== undefined) {
+      return {
+        flags,
+        error: descriptionFlag.error
+      };
+    }
+
+    if (descriptionFlag.handled && descriptionFlag.value !== undefined) {
+      flags.description = descriptionFlag.value;
+      index = descriptionFlag.nextIndex;
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    if (flags.currentName === undefined) {
+      flags.currentName = token;
+      continue;
+    }
+
+    return {
+      flags,
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Unexpected argument: ${token}\n`
+      }
+    };
+  }
+
+  return { flags };
+}
+
+function parseLabelDeleteFlags(args: string[]): { flags: ParsedLabelDeleteFlags; error?: CliResult } {
+  const flags: ParsedLabelDeleteFlags = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+
+    if (token === undefined) {
+      break;
+    }
+
+    const repositoryFlag = parseStringFlagValue(args, index, { long: "--repo", short: "-R" });
+
+    if (repositoryFlag.error !== undefined) {
+      return {
+        flags,
+        error: repositoryFlag.error
+      };
+    }
+
+    if (repositoryFlag.handled && repositoryFlag.value !== undefined) {
+      flags.repository = repositoryFlag.value;
+      index = repositoryFlag.nextIndex;
+      continue;
+    }
+
+    if (token === "--yes" || token === "-y") {
+      continue;
+    }
+
+    if (token.startsWith("-")) {
+      return {
+        flags,
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Unknown flag or argument: ${token}\n`
+        }
+      };
+    }
+
+    if (flags.name === undefined) {
+      flags.name = token;
+      continue;
+    }
+
+    return {
+      flags,
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Unexpected argument: ${token}\n`
+      }
+    };
+  }
+
+  return { flags };
+}
+
+function labelMutationActionLabel(commandName: "edit" | "delete"): "editing" | "deleting" {
+  return commandName === "edit" ? "editing" : "deleting";
+}
+
+function normalizeLabelColor(rawColor: string): { color?: string; error?: CliResult } {
+  const color = rawColor.startsWith("#") ? rawColor.slice(1) : rawColor;
+
+  if (!/^[0-9a-fA-F]{6}$/.test(color)) {
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Invalid value for --color: ${rawColor}. Expected a 6-digit hex label color.\n`
+      }
+    };
+  }
+
+  return {
+    color: color.toLowerCase()
+  };
 }
 
 function validateStructuredLabelFlags(flags: ParsedLabelListFlags): CliResult | undefined {
@@ -302,18 +600,14 @@ function validateStructuredLabelFlags(flags: ParsedLabelListFlags): CliResult | 
   return undefined;
 }
 
-function mapLabelRecord(payload: GiteaLabelPayload | null | undefined): LabelRecord | null {
-  if (payload === null || payload === undefined || typeof payload !== "object" || Array.isArray(payload)) {
-    return null;
-  }
+async function readGiteaErrorMessage(response: Response): Promise<string | undefined> {
+  try {
+    const payload = await response.json() as { message?: string };
 
-  return {
-    color: typeof payload.color === "string" && payload.color.length > 0 ? payload.color : null,
-    description: typeof payload.description === "string" && payload.description.length > 0 ? payload.description : null,
-    id: typeof payload.id === "number" ? payload.id : null,
-    name: typeof payload.name === "string" && payload.name.length > 0 ? payload.name : null,
-    url: typeof payload.url === "string" && payload.url.length > 0 ? payload.url : null
-  };
+    return typeof payload.message === "string" && payload.message.length > 0 ? payload.message : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function readRepositoryLabels(
@@ -359,7 +653,7 @@ async function readRepositoryLabels(
 
     return {
       labels: payload
-        .map((entry) => mapLabelRecord(entry as GiteaLabelPayload | null | undefined))
+        .map((entry) => mapRepositoryLabelRecord(entry as GiteaLabelPayload | null | undefined))
         .filter((entry): entry is LabelRecord => entry !== null)
     };
   } catch (error) {
@@ -370,6 +664,280 @@ async function readRepositoryLabels(
         exitCode: 1,
         stdout: "",
         stderr: `Failed to list labels for ${repository.owner}/${repository.repository} from ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function readRepositoryLabelsForMutation(
+  repository: { hostname: string; owner: string; repository: string },
+  currentName: string,
+  context: ResolvedCliExecutionContext,
+  commandName: "edit" | "delete"
+): Promise<{ labels?: GiteaLabelPayload[]; error?: CliResult }> {
+  const tokenResult = resolveRequiredLabelToken(repository.hostname, context, commandName);
+
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
+  }
+
+  const actionLabel = labelMutationActionLabel(commandName);
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      headers: buildAuthorizationHeaders(tokenResult.token) ?? {}
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while ${actionLabel} label "${currentName}" on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while ${actionLabel} label "${currentName}" in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    const payload = await response.json();
+
+    if (!Array.isArray(payload)) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Failed to resolve label "${currentName}" in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {
+      labels: payload as GiteaLabelPayload[]
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to ${commandName} label "${currentName}" on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function createRepositoryLabel(
+  repository: { hostname: string; owner: string; repository: string },
+  input: { name: string; color: string; description?: string },
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  const tokenResult = resolveRequiredLabelToken(repository.hostname, context, "create");
+
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${tokenResult.token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        name: input.name,
+        color: input.color,
+        ...(input.description === undefined ? {} : { description: input.description })
+      })
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while creating label "${input.name}" on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while creating label "${input.name}" in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while creating label "${input.name}" in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while creating label "${input.name}" in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to create label "${input.name}" on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function editRepositoryLabel(
+  repository: { hostname: string; owner: string; repository: string },
+  labelId: number,
+  currentName: string,
+  input: { name?: string; color?: string; description?: string },
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  const tokenResult = resolveRequiredLabelToken(repository.hostname, context, "edit");
+
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels/${labelId}`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "PATCH",
+      headers: {
+        Authorization: `token ${tokenResult.token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        ...(input.name === undefined ? {} : { name: input.name }),
+        ...(input.color === undefined ? {} : { color: input.color }),
+        ...(input.description === undefined ? {} : { description: input.description })
+      })
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while editing label "${currentName}" on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (response.status === 400 || response.status === 422) {
+      const validationMessage = await readGiteaErrorMessage(response);
+
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: validationMessage === undefined
+            ? `Validation failed while editing label "${currentName}" in ${repository.owner}/${repository.repository}.\n`
+            : `Validation failed while editing label "${currentName}" in ${repository.owner}/${repository.repository}: ${validationMessage}\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while editing label "${currentName}" in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to edit label "${currentName}" on ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
+async function deleteRepositoryLabel(
+  repository: { hostname: string; owner: string; repository: string },
+  labelId: number,
+  currentName: string,
+  context: ResolvedCliExecutionContext
+): Promise<{ error?: CliResult }> {
+  const tokenResult = resolveRequiredLabelToken(repository.hostname, context, "delete");
+
+  if ("error" in tokenResult) {
+    return { error: tokenResult.error };
+  }
+
+  const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/labels/${labelId}`;
+
+  try {
+    const response = await fetch(requestUrl, {
+      method: "DELETE",
+      headers: buildAuthorizationHeaders(tokenResult.token)
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Authentication failed while deleting label "${currentName}" on ${repository.hostname}.\n`
+        }
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while deleting label "${currentName}" in ${repository.owner}/${repository.repository}.\n`
+        }
+      };
+    }
+
+    return {};
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to delete label "${currentName}" on ${repository.hostname}: ${message}\n`
       }
     };
   }
@@ -463,6 +1031,231 @@ export async function executeLabelCommand(
 ): Promise<CliResult | undefined> {
   if (args[0] !== "label") {
     return undefined;
+  }
+
+  if (args[1] === "create") {
+    const parsedFlags = parseLabelCreateFlags(args.slice(2));
+
+    if (parsedFlags.error !== undefined) {
+      return parsedFlags.error;
+    }
+
+    if (parsedFlags.flags.name === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Label name is required.\n"
+      };
+    }
+
+    if (parsedFlags.flags.color === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Label color is required.\n"
+      };
+    }
+
+    const colorResult = normalizeLabelColor(parsedFlags.flags.color);
+
+    if (colorResult.error !== undefined || colorResult.color === undefined) {
+      return colorResult.error;
+    }
+
+    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const createResult = await createRepositoryLabel(
+      repositoryResult.target.repository,
+      {
+        name: parsedFlags.flags.name,
+        color: colorResult.color,
+        ...(parsedFlags.flags.description === undefined ? {} : { description: parsedFlags.flags.description })
+      },
+      context
+    );
+
+    if (createResult.error !== undefined) {
+      return createResult.error;
+    }
+
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    };
+  }
+
+  if (args[1] === "edit") {
+    const parsedFlags = parseLabelEditFlags(args.slice(2));
+
+    if (parsedFlags.error !== undefined) {
+      return parsedFlags.error;
+    }
+
+    if (parsedFlags.flags.currentName === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Label name is required.\n"
+      };
+    }
+
+    if (
+      parsedFlags.flags.newName === undefined
+      && parsedFlags.flags.color === undefined
+      && parsedFlags.flags.description === undefined
+    ) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Specify at least one of --name, --color, or --description.\n"
+      };
+    }
+
+    let color = parsedFlags.flags.color;
+
+    if (color !== undefined) {
+      const colorResult = normalizeLabelColor(color);
+
+      if (colorResult.error !== undefined || colorResult.color === undefined) {
+        return colorResult.error;
+      }
+
+      color = colorResult.color;
+    }
+
+    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const labelLookupResult = await readRepositoryLabelsForMutation(
+      repositoryResult.target.repository,
+      parsedFlags.flags.currentName,
+      context,
+      "edit"
+    );
+
+    if (labelLookupResult.error !== undefined || labelLookupResult.labels === undefined) {
+      return labelLookupResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to resolve label "${parsedFlags.flags.currentName}".\n`
+      };
+    }
+
+    const labelId = buildRepositoryLabelIdLookup(labelLookupResult.labels).get(parsedFlags.flags.currentName);
+
+    if (labelId === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Validation failed while editing label "${parsedFlags.flags.currentName}" in ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}: label "${parsedFlags.flags.currentName}" was not found.\n`
+      };
+    }
+
+    const editResult = await editRepositoryLabel(
+      repositoryResult.target.repository,
+      labelId,
+      parsedFlags.flags.currentName,
+      {
+        ...(parsedFlags.flags.newName === undefined ? {} : { name: parsedFlags.flags.newName }),
+        ...(color === undefined ? {} : { color }),
+        ...(parsedFlags.flags.description === undefined ? {} : { description: parsedFlags.flags.description })
+      },
+      context
+    );
+
+    if (editResult.error !== undefined) {
+      return editResult.error;
+    }
+
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    };
+  }
+
+  if (args[1] === "delete") {
+    const parsedFlags = parseLabelDeleteFlags(args.slice(2));
+
+    if (parsedFlags.error !== undefined) {
+      return parsedFlags.error;
+    }
+
+    if (parsedFlags.flags.name === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Label name is required.\n"
+      };
+    }
+
+    const repositoryResult = resolveRepositoryCommandTarget(parsedFlags.flags.repository, { mode: "none" }, context);
+
+    if (repositoryResult.error !== undefined || repositoryResult.target?.repository === undefined) {
+      return repositoryResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "No Repository Context selected.\n"
+      };
+    }
+
+    const labelLookupResult = await readRepositoryLabelsForMutation(
+      repositoryResult.target.repository,
+      parsedFlags.flags.name,
+      context,
+      "delete"
+    );
+
+    if (labelLookupResult.error !== undefined || labelLookupResult.labels === undefined) {
+      return labelLookupResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to resolve label "${parsedFlags.flags.name}".\n`
+      };
+    }
+
+    const labelId = buildRepositoryLabelIdLookup(labelLookupResult.labels).get(parsedFlags.flags.name);
+
+    if (labelId === undefined) {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Validation failed while deleting label "${parsedFlags.flags.name}" in ${repositoryResult.target.repository.owner}/${repositoryResult.target.repository.repository}: label "${parsedFlags.flags.name}" was not found.\n`
+      };
+    }
+
+    const deleteResult = await deleteRepositoryLabel(
+      repositoryResult.target.repository,
+      labelId,
+      parsedFlags.flags.name,
+      context
+    );
+
+    if (deleteResult.error !== undefined) {
+      return deleteResult.error;
+    }
+
+    return {
+      exitCode: 0,
+      stdout: "",
+      stderr: ""
+    };
   }
 
   if (args[1] !== "list") {
