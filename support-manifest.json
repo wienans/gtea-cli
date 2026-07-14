@@ -1097,6 +1097,11 @@
         "status": "supported"
       },
       {
+        "name": "--inline-comments-file",
+        "summary": "Read inline review comments as JSON from a file or standard input",
+        "status": "supported"
+      },
+      {
         "name": "--comment",
         "aliases": [
           "-c"
@@ -2202,6 +2207,22 @@
           "flagProfiles": [
             "prRepositoryTarget",
             "prReviewOptions"
+          ],
+          "helpSections": [
+            {
+              "title": "Inline Review Comment Input",
+              "lines": [
+                "Provide a non-empty JSON array with path, positive integer line, LEFT or RIGHT side, and non-empty body.",
+                "[{\"path\":\"src/pr.ts\",\"line\":42,\"side\":\"RIGHT\",\"body\":\"Please handle this error.\"}]"
+              ]
+            },
+            {
+              "title": "Examples",
+              "lines": [
+                "gtea pr review 18 --inline-comments-file comments.json",
+                "echo '[{\"path\":\"src/pr.ts\",\"line\":42,\"side\":\"RIGHT\",\"body\":\"Please handle this error.\"}]' | gtea pr review 18 --inline-comments-file -"
+              ]
+            }
           ]
         },
         {

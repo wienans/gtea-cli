@@ -18,6 +18,11 @@ export interface OutputFieldSpec {
   reason?: string;
 }
 
+export interface HelpSectionSpec {
+  title: string;
+  lines: string[];
+}
+
 interface ManifestNodeBase {
   kind: "group" | "command";
   name: string;
@@ -35,6 +40,7 @@ export interface ManifestCommand extends ManifestNodeBase {
   kind: "command";
   flags: FlagSpec[];
   outputFields: OutputFieldSpec[];
+  helpSections?: HelpSectionSpec[];
 }
 
 export type ManifestNode = ManifestGroup | ManifestCommand;
@@ -64,6 +70,7 @@ interface RawManifestCommand extends RawManifestNodeBase {
   kind: "command";
   flagProfiles?: string[];
   outputProfiles?: string[];
+  helpSections?: HelpSectionSpec[];
 }
 
 type RawManifestNode = RawManifestGroup | RawManifestCommand;
@@ -94,6 +101,7 @@ function withFallbackReason<T extends { reason?: string }>(item: T, fallbackReas
   };
 }
 
+/** @author S.Wienand */
 function hydrateNode(rawManifest: RawSupportManifest, node: RawManifestNode): ManifestNode {
   if (node.kind === "group") {
     return {

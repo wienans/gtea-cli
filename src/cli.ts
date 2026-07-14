@@ -104,6 +104,7 @@ function renderOutputFields(command: ManifestCommand): string[] {
   ];
 }
 
+/** @author S.Wienand */
 function renderCommandHelp(path: string[], command: ManifestCommand): string {
   const lines = [
     command.summary,
@@ -121,6 +122,10 @@ function renderCommandHelp(path: string[], command: ManifestCommand): string {
 
   lines.push(...renderFlags(command));
   lines.push(...renderOutputFields(command));
+
+  for (const section of command.helpSections ?? []) {
+    lines.push("", `${section.title}:`, ...section.lines.map((line) => `  ${line}`));
+  }
 
   return `${lines.join("\n")}\n`;
 }
