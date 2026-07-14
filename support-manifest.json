@@ -838,6 +838,13 @@
         ]
       }
     ],
+    "prViewOptions": [
+      {
+        "name": "--comments",
+        "summary": "View pull request comments",
+        "status": "supported"
+      }
+    ],
     "prCreateOptions": [
       {
         "name": "--base",
@@ -1721,6 +1728,48 @@
         "status": "supported"
       }
     ],
+    "prViewRead": [
+      {
+        "name": "number",
+        "summary": "Pull request number",
+        "status": "supported"
+      },
+      {
+        "name": "title",
+        "summary": "Pull request title",
+        "status": "supported"
+      },
+      {
+        "name": "state",
+        "summary": "Pull request state",
+        "status": "supported"
+      },
+      {
+        "name": "headRefName",
+        "summary": "Source branch name",
+        "status": "supported"
+      },
+      {
+        "name": "baseRefName",
+        "summary": "Target branch name",
+        "status": "supported"
+      },
+      {
+        "name": "url",
+        "summary": "Pull request web URL",
+        "status": "supported"
+      },
+      {
+        "name": "comments",
+        "summary": "Pull request comments",
+        "status": "supported"
+      },
+      {
+        "name": "commentCount",
+        "summary": "Total pull request comments",
+        "status": "supported"
+      }
+    ],
     "releaseRead": [
       {
         "name": "tagName",
@@ -2071,10 +2120,11 @@
           "status": "supported",
           "flagProfiles": [
             "prRepositoryTarget",
-            "prStructuredOutput"
+            "prStructuredOutput",
+            "prViewOptions"
           ],
           "outputProfiles": [
-            "prRead"
+            "prViewRead"
           ]
         },
         {

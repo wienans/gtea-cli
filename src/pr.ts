@@ -26,6 +26,7 @@ interface ParsedPullRequestFlags {
   jsonFields?: string[];
   jqExpression?: string;
   template?: string;
+  showComments?: boolean;
 }
 
 interface ParsedPullRequestCreateFlags {
@@ -75,12 +76,32 @@ interface PullRequestRecord {
   headRefName: string;
   baseRefName: string;
   url: string;
+  body?: string;
+  commentCount?: number;
+  comments?: PullRequestCommentRecord[];
+}
+
+interface PullRequestUserRecord extends StructuredObject {
+  id: number | null;
+  login: string | null;
+  name: string | null;
+}
+
+interface PullRequestCommentRecord extends StructuredObject {
+  id: number | null;
+  author: PullRequestUserRecord | null;
+  body: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  url: string | null;
 }
 
 interface GiteaPullRequestPayload {
   number?: number;
   title?: string;
   state?: string;
+  body?: string;
+  comments?: number;
   assignee?: { login?: string };
   assignees?: Array<{ login?: string }>;
   user?: { login?: string };
@@ -90,6 +111,28 @@ interface GiteaPullRequestPayload {
   base?: {
     ref?: string;
   };
+}
+
+interface GiteaPullRequestUserPayload {
+  id?: number;
+  login?: string;
+  full_name?: string;
+}
+
+interface GiteaPullRequestCommentPayload {
+  id?: number;
+  body?: string;
+  created_at?: string;
+  updated_at?: string;
+  html_url?: string;
+  user?: GiteaPullRequestUserPayload | null;
+}
+
+interface GiteaPullRequestReviewPayload {
+  id?: number;
+  body?: string;
+  submitted_at?: string;
+  user?: GiteaPullRequestUserPayload | null;
 }
 
 const prGroup = supportManifest.children.find(
@@ -226,6 +269,11 @@ function parsePullRequestFlags(args: string[]): { flags: ParsedPullRequestFlags;
     if (templateFlag.handled && templateFlag.value !== undefined) {
       flags.template = templateFlag.value;
       index = templateFlag.nextIndex;
+      continue;
+    }
+
+    if (token === "--comments") {
+      flags.showComments = true;
       continue;
     }
 
@@ -1022,6 +1070,8 @@ function mapPullRequestRecord(
   fallbackNumber: number
 ): PullRequestRecord {
   const number = typeof payload.number === "number" ? payload.number : fallbackNumber;
+  const body = typeof payload.body === "string" ? payload.body : undefined;
+  const commentCount = typeof payload.comments === "number" ? payload.comments : undefined;
 
   return {
     number,
@@ -1029,7 +1079,35 @@ function mapPullRequestRecord(
     state: typeof payload.state === "string" ? payload.state : "unknown",
     headRefName: typeof payload.head?.ref === "string" ? payload.head.ref : "unknown",
     baseRefName: typeof payload.base?.ref === "string" ? payload.base.ref : "unknown",
-    url: buildPullRequestUrl(repository, number)
+    url: buildPullRequestUrl(repository, number),
+    ...(body === undefined ? {} : { body }),
+    ...(commentCount === undefined ? {} : { commentCount })
+  };
+}
+
+function mapPullRequestUserRecord(payload?: GiteaPullRequestUserPayload | null): PullRequestUserRecord | null {
+  if (payload === undefined || payload === null) {
+    return null;
+  }
+
+  const id = typeof payload.id === "number" ? payload.id : null;
+  const login = typeof payload.login === "string" ? payload.login : null;
+  const name = typeof payload.full_name === "string" ? payload.full_name : null;
+
+  return id === null && login === null && name === null ? null : { id, login, name };
+}
+
+function mapPullRequestCommentRecord(
+  payload: GiteaPullRequestCommentPayload,
+  fallbackCreatedAt?: string
+): PullRequestCommentRecord {
+  return {
+    id: typeof payload.id === "number" ? payload.id : null,
+    author: mapPullRequestUserRecord(payload.user),
+    body: typeof payload.body === "string" ? payload.body : "",
+    createdAt: typeof payload.created_at === "string" ? payload.created_at : fallbackCreatedAt ?? null,
+    updatedAt: typeof payload.updated_at === "string" ? payload.updated_at : null,
+    url: typeof payload.html_url === "string" ? payload.html_url : null
   };
 }
 
@@ -1472,6 +1550,173 @@ async function readPullRequest(
   }
 }
 
+async function readAllPullRequestCommentPayloads<T>(
+  requestUrl: string,
+  tokenResult: ReturnType<typeof resolveOptionalTokenResult>,
+  requestOptions: RequestInit | undefined,
+  pullRequestNumber: number,
+  kind: string
+): Promise<{ payload?: T[]; error?: CliResult }> {
+  const payload: T[] = [];
+  let page = 1;
+  let totalCount: number | undefined;
+
+  while (totalCount === undefined || payload.length < totalCount) {
+    const pageUrl = page === 1 ? requestUrl : `${requestUrl}${requestUrl.includes("?") ? "&" : "?"}page=${page}`;
+    const response = await fetch(pageUrl, requestOptions);
+
+    if (!response.ok) {
+      return {
+        error: preferOptionalTokenError(tokenResult, {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned ${response.status} while reading ${kind} for pull request #${pullRequestNumber}.\n`
+        })
+      };
+    }
+
+    const pagePayload = await response.json() as T[];
+
+    if (!Array.isArray(pagePayload)) {
+      return {
+        error: {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Gitea returned an invalid ${kind} payload while reading pull request #${pullRequestNumber}.\n`
+        }
+      };
+    }
+
+    payload.push(...pagePayload);
+
+    if (page === 1) {
+      const rawTotalCount = response.headers.get("x-total-count");
+
+      if (rawTotalCount !== null && /^\d+$/.test(rawTotalCount)) {
+        totalCount = Number.parseInt(rawTotalCount, 10);
+      }
+    }
+
+    if (totalCount === undefined || pagePayload.length === 0) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return { payload };
+}
+
+async function readPullRequestComments(
+  repository: RepositoryContext,
+  pullRequestNumber: number,
+  context: ResolvedCliExecutionContext
+): Promise<{ comments?: PullRequestCommentRecord[]; error?: CliResult }> {
+  const apiUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}`;
+  const pullRequestUrl = `${apiUrl}/pulls/${pullRequestNumber}`;
+  const tokenResult = resolveOptionalTokenResult(repository.hostname, context);
+  const headers = buildAuthorizationHeaders(tokenResult.token);
+  const requestOptions = headers === undefined ? undefined : { headers };
+
+  try {
+    const standardCommentResult = await readAllPullRequestCommentPayloads<GiteaPullRequestCommentPayload>(
+      `${apiUrl}/issues/${pullRequestNumber}/comments`,
+      tokenResult,
+      requestOptions,
+      pullRequestNumber,
+      "comments"
+    );
+
+    if (standardCommentResult.error !== undefined || standardCommentResult.payload === undefined) {
+      return {
+        error: standardCommentResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Failed to read comments for pull request #${pullRequestNumber}.\n`
+        }
+      };
+    }
+
+    const reviewResult = await readAllPullRequestCommentPayloads<GiteaPullRequestReviewPayload>(
+      `${pullRequestUrl}/reviews`,
+      tokenResult,
+      requestOptions,
+      pullRequestNumber,
+      "reviews"
+    );
+
+    if (reviewResult.error !== undefined || reviewResult.payload === undefined) {
+      return {
+        error: reviewResult.error ?? {
+          exitCode: 1,
+          stdout: "",
+          stderr: `Failed to read reviews for pull request #${pullRequestNumber}.\n`
+        }
+      };
+    }
+
+    const comments = standardCommentResult.payload.map((comment) => mapPullRequestCommentRecord(comment));
+
+    for (const review of reviewResult.payload) {
+      if (typeof review.body === "string" && review.body.length > 0) {
+        comments.push(
+          mapPullRequestCommentRecord(
+            {
+              ...(review.id === undefined ? {} : { id: review.id }),
+              body: review.body,
+              ...(review.user === undefined ? {} : { user: review.user })
+            },
+            review.submitted_at
+          )
+        );
+      }
+
+      if (typeof review.id !== "number") {
+        continue;
+      }
+
+      const reviewCommentResult = await readAllPullRequestCommentPayloads<GiteaPullRequestCommentPayload>(
+        `${pullRequestUrl}/reviews/${review.id}/comments`,
+        tokenResult,
+        requestOptions,
+        pullRequestNumber,
+        "review comments"
+      );
+
+      if (reviewCommentResult.error !== undefined || reviewCommentResult.payload === undefined) {
+        return {
+          error: reviewCommentResult.error ?? {
+            exitCode: 1,
+            stdout: "",
+            stderr: `Failed to read review comments for pull request #${pullRequestNumber}.\n`
+          }
+        };
+      }
+
+      comments.push(...reviewCommentResult.payload.map((comment) => mapPullRequestCommentRecord(comment)));
+    }
+
+    comments.sort((left, right) => {
+      const leftTime = left.createdAt === null ? 0 : Date.parse(left.createdAt);
+      const rightTime = right.createdAt === null ? 0 : Date.parse(right.createdAt);
+
+      return (Number.isNaN(leftTime) ? 0 : leftTime) - (Number.isNaN(rightTime) ? 0 : rightTime);
+    });
+
+    return { comments };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return {
+      error: {
+        exitCode: 1,
+        stdout: "",
+        stderr: `Failed to read comments for pull request #${pullRequestNumber} from ${repository.hostname}: ${message}\n`
+      }
+    };
+  }
+}
+
 async function readPullRequestDiff(
   repository: RepositoryContext,
   pullRequestNumber: number,
@@ -1695,14 +1940,55 @@ async function readCurrentUser(hostname: string, context: ResolvedCliExecutionCo
   }
 }
 
-function renderPullRequest(pullRequest: PullRequestRecord): string {
-  return [
+function renderPullRequest(pullRequest: PullRequestRecord, options?: { showAllComments?: boolean }): string {
+  const lines = [
     `${pullRequest.title} (#${pullRequest.number})`,
     `State: ${pullRequest.state}`,
     `Head: ${pullRequest.headRefName}`,
     `Base: ${pullRequest.baseRefName}`,
     `URL: ${pullRequest.url}`
-  ].join("\n") + "\n";
+  ];
+
+  if (pullRequest.body !== undefined && pullRequest.body.length > 0) {
+    lines.push("", pullRequest.body);
+  }
+
+  if (pullRequest.comments !== undefined && pullRequest.comments.length === 0) {
+    lines.push("", "No comments.");
+  }
+
+  if (pullRequest.comments !== undefined && pullRequest.comments.length > 0) {
+    if (options?.showAllComments === true) {
+      for (const comment of pullRequest.comments) {
+        lines.push(
+          "",
+          comment.author?.login === null || comment.author?.login === undefined
+            ? "Comment"
+            : `${comment.author.login} • Comment`,
+          "",
+          comment.body
+        );
+      }
+    } else {
+      const newestComment = pullRequest.comments[pullRequest.comments.length - 1]!;
+      const hiddenCommentCount = Math.max((pullRequest.commentCount ?? pullRequest.comments.length) - 1, 0);
+
+      if (hiddenCommentCount > 0) {
+        lines.push("", `-------- Not showing ${hiddenCommentCount} comment${hiddenCommentCount === 1 ? "" : "s"} --------`);
+      }
+
+      lines.push(
+        "",
+        newestComment.author?.login === null || newestComment.author?.login === undefined
+          ? "Newest comment"
+          : `${newestComment.author.login} • Newest comment`,
+        "",
+        newestComment.body
+      );
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 function renderPullRequestList(pullRequests: PullRequestRecord[]): string {
@@ -2101,6 +2387,14 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
     return parsedFlags.error;
   }
 
+  if (parsedFlags.flags.showComments === true && subcommand !== "view") {
+    return {
+      exitCode: 1,
+      stdout: "",
+      stderr: "--comments is only supported with pr view.\n"
+    };
+  }
+
   if (parsedFlags.flags.jqExpression !== undefined && parsedFlags.flags.jsonFields === undefined) {
     return {
       exitCode: 1,
@@ -2334,6 +2628,33 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
     };
   }
 
+  if (
+    subcommand === "view"
+    && (parsedFlags.flags.jsonFields === undefined
+      || parsedFlags.flags.jsonFields.includes("comments")
+      || parsedFlags.flags.jsonFields.includes("commentCount"))
+  ) {
+    const commentResult = await readPullRequestComments(
+      repositoryResult.target.repository,
+      pullRequestNumber,
+      context
+    );
+
+    if (commentResult.error !== undefined || commentResult.comments === undefined) {
+      return commentResult.error ?? {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Failed to read pull request comments.\n"
+      };
+    }
+
+    pullRequestResult.pullRequest = {
+      ...pullRequestResult.pullRequest,
+      comments: commentResult.comments,
+      commentCount: commentResult.comments.length
+    };
+  }
+
   if (parsedFlags.flags.jsonFields !== undefined) {
     const renderedOutput = renderStructuredPullRequestOutput(
       pullRequestResult.pullRequest,
@@ -2359,7 +2680,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
 
   return {
     exitCode: 0,
-    stdout: renderPullRequest(pullRequestResult.pullRequest),
+    stdout: renderPullRequest(pullRequestResult.pullRequest, { showAllComments: parsedFlags.flags.showComments === true }),
     stderr: ""
   };
 }
