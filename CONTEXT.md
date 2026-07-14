@@ -92,6 +92,10 @@ _Avoid_: command-only matrix, coarse support list
 A test setup that compares `gtea` against `gh` command surfaces and runs behavior checks against a disposable Gitea instance.
 _Avoid_: unit tests only, informal manual checks
 
+**Inline Review Comment Input**:
+A write-only comment description containing a repository path, positive line number, `LEFT` or `RIGHT` diff side, and body; `gtea` translates it to the Gitea Host's review-comment request shape.
+_Avoid_: review comment record, raw Gitea comment payload
+
 ## Relationships
 
 - A **Compatibility Matrix** classifies each **Script-Compatible Command** as supported, emulated, or unsupported.
@@ -122,6 +126,7 @@ _Avoid_: unit tests only, informal manual checks
 - A **Broad-First Milestone** proves the cross-cutting pieces of the **Compatibility Matrix** before deep write coverage.
 - A **Fine-Grained Support Manifest** classifies command paths, flags, and output fields separately.
 - A **Compatibility Harness** verifies the **Fine-Grained Support Manifest** against real `gh` surfaces and a disposable Gitea backend.
+- One or more **Inline Review Comment Inputs** may be submitted as part of a pull request review.
 
 ## Example dialogue
 
@@ -152,3 +157,4 @@ _Avoid_: unit tests only, informal manual checks
 - Command-level support alone is too vague for script compatibility; resolved: the project uses a **Fine-Grained Support Manifest**.
 - Compatibility needs executable proof, not just intentions; resolved: the project uses a **Compatibility Harness** with golden comparisons and disposable Gitea tests.
 - "full interface" was ambiguous between broad compatibility and full `gh` parity; resolved: `gtea` broadens the `gh`-shaped surface only where Gitea has a **Semantic Match**, and keeps the rest explicit in the **Compatibility Matrix**.
+- Inline review comment write input and comment output records serve different contracts; resolved: an **Inline Review Comment Input** is a distinct write-only shape that shares location terminology with readable comments where applicable.
