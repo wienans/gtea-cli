@@ -2593,6 +2593,10 @@ test("pr comment, review, and merge help classify the supported PR write slice",
   assert.match(reviewHelp.stdout, /--comment, -c[\s\S]*\[supported\]/i);
   assert.match(reviewHelp.stdout, /--request-changes, -r[\s\S]*\[supported\]/i);
   assert.match(reviewHelp.stdout, /--body-file, -F[\s\S]*\[supported\]/i);
+  assert.match(reviewHelp.stdout, /--inline-comments-file[\s\S]*\[supported\]/i);
+  assert.match(reviewHelp.stdout, /Inline Review Comment Input:[\s\S]*"path"[\s\S]*"line"[\s\S]*"side"[\s\S]*"body"/i);
+  assert.match(reviewHelp.stdout, /gtea pr review 18 --inline-comments-file comments\.json/i);
+  assert.match(reviewHelp.stdout, /\| gtea pr review 18 --inline-comments-file -/i);
 
   assert.equal(mergeHelp.exitCode, 0);
   assert.match(mergeHelp.stdout, /--admin[\s\S]*\[supported\]/i);
@@ -5291,6 +5295,291 @@ test("pr review submits an approval review to the selected Gitea host", async ()
       })
     );
   }
+});
+
+test("pr review submits inline comments from a file in one combined review", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "gtea-pr-review-comments-"));
+  const commentsPath = join(tempDir, "comments.json");
+  writeFileSync(commentsPath, JSON.stringify([
+    {
+      path: "src/pr.ts",
+      line: 42,
+      side: "RIGHT",
+      body: "Please handle this error."
+    },
+    {
+      path: "src/legacy.ts",
+      line: 12,
+      side: "LEFT",
+      body: "This removal needs a migration note."
+    }
+  ]));
+
+  const server = createServer(async (request, response) => {
+    assert.equal(request.method, "POST");
+    assert.equal(request.url, "/api/v1/repos/octo/project/pulls/18/reviews");
+
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      event: "REQUEST_CHANGES",
+      body: "Please address the inline feedback.",
+      comments: [
+        {
+          path: "src/pr.ts",
+          body: "Please handle this error.",
+          new_position: 42
+        },
+        {
+          path: "src/legacy.ts",
+          body: "This removal needs a migration note.",
+          old_position: 12
+        }
+      ]
+    });
+
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ id: 5, state: "REQUEST_CHANGES" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "review",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--request-changes",
+      "--body",
+      "Please address the inline feedback.",
+      "--inline-comments-file",
+      "comments.json"
+    ], {
+      cwd: tempDir,
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-review-token"
+      }
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+    rmSync(tempDir, { force: true, recursive: true });
+  }
+});
+
+test("pr review defaults to a comment event when inline comments are supplied without an event", async () => {
+  const server = createServer(async (request, response) => {
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      event: "COMMENT",
+      comments: [{ path: "src/pr.ts", body: "Explain this branch.", new_position: 24 }]
+    });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ id: 6, state: "COMMENT" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "review",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--inline-comments-file",
+      "-"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-review-token"
+      },
+      stdin: JSON.stringify([{ path: "src/pr.ts", line: 24, side: "RIGHT", body: "Explain this branch." }])
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => error === undefined ? resolve() : reject(error))
+    );
+  }
+});
+
+test("pr review parses inline comments from standard input with an explicit event", async () => {
+  const server = createServer(async (request, response) => {
+    let requestBody = "";
+
+    for await (const chunk of request) {
+      requestBody += chunk;
+    }
+
+    assert.deepEqual(JSON.parse(requestBody), {
+      event: "APPROVED",
+      comments: [{ path: "src/legacy.ts", body: "Verified removal.", old_position: 7 }]
+    });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ id: 7, state: "APPROVED" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "review",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--approve",
+      "--inline-comments-file",
+      "-"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-review-token"
+      },
+      stdin: JSON.stringify([{ path: "src/legacy.ts", line: 7, side: "LEFT", body: "Verified removal." }])
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => error === undefined ? resolve() : reject(error))
+    );
+  }
+});
+
+test("pr review rejects invalid inline comment documents without making a request", async () => {
+  let requestCount = 0;
+  const server = createServer((_request, response) => {
+    requestCount += 1;
+    response.writeHead(500);
+    response.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+  const invalidDocuments = [
+    "not json",
+    JSON.stringify({ path: "src/pr.ts" }),
+    JSON.stringify([]),
+    JSON.stringify([null]),
+    JSON.stringify([{ path: "src/pr.ts", line: 1, side: "MIDDLE", body: "Feedback" }]),
+    JSON.stringify([{ path: "src/pr.ts", line: 0, side: "RIGHT", body: "Feedback" }]),
+    JSON.stringify([{ path: "src/pr.ts", line: 1.5, side: "RIGHT", body: "Feedback" }]),
+    JSON.stringify([{ path: 4, line: 1, side: "RIGHT", body: "Feedback" }]),
+    JSON.stringify([{ path: "src/pr.ts", line: 1, side: "RIGHT", body: 4 }]),
+    JSON.stringify([{ path: "src/pr.ts", line: 1, side: "RIGHT", body: "  " }])
+  ];
+
+  try {
+    for (const stdin of invalidDocuments) {
+      const result = await executeCli([
+        "pr",
+        "review",
+        "18",
+        "-R",
+        `127.0.0.1:${port}/octo/project`,
+        "--inline-comments-file",
+        "-"
+      ], {
+        env: {
+          GTEA_HOST: `127.0.0.1:${port}`,
+          GTEA_TOKEN: "pr-review-token"
+        },
+        stdin
+      });
+
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.stdout, "");
+      assert.notEqual(result.stderr, "");
+    }
+
+    assert.equal(requestCount, 0);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => error === undefined ? resolve() : reject(error))
+    );
+  }
+});
+
+test("pr review rejects two standard input consumers without making a request", async () => {
+  let requestCount = 0;
+  const server = createServer((_request, response) => {
+    requestCount += 1;
+    response.writeHead(500);
+    response.end();
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "review",
+      "18",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--comment",
+      "--body-file",
+      "-",
+      "--inline-comments-file",
+      "-"
+    ], {
+      env: {
+        GTEA_HOST: `127.0.0.1:${port}`,
+        GTEA_TOKEN: "pr-review-token"
+      },
+      stdin: "[]"
+    });
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /standard input.*only one/i);
+    assert.equal(requestCount, 0);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => error === undefined ? resolve() : reject(error))
+    );
+  }
+});
+
+test("pr review still requires an explicit event without inline comments", async () => {
+  const result = await executeCli(["pr", "review", "18", "--body", "General feedback."]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "Specify one of --approve, --comment, or --request-changes.\n");
 });
 
 test("pr merge posts the selected merge method and merge options to the Gitea host", async () => {

@@ -52,8 +52,21 @@ interface ParsedPullRequestReviewFlags {
   repository?: string;
   body?: string;
   bodyFile?: string;
+  inlineCommentsFile?: string;
   event?: PullRequestReviewEvent;
 }
+
+interface InlineReviewCommentInput {
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  body: string;
+}
+
+type GiteaInlineReviewComment = {
+  path: string;
+  body: string;
+} & ({ old_position: number } | { new_position: number });
 
 type PullRequestMergeMethod = "merge" | "rebase" | "squash";
 
@@ -718,6 +731,7 @@ function parsePullRequestCommentFlags(args: string[]): { flags: ParsedPullReques
   return { flags };
 }
 
+/** @author S.Wienand */
 function parsePullRequestReviewFlags(args: string[]): { flags: ParsedPullRequestReviewFlags; error?: CliResult } {
   const flags: ParsedPullRequestReviewFlags = {};
 
@@ -770,6 +784,24 @@ function parsePullRequestReviewFlags(args: string[]): { flags: ParsedPullRequest
     if (bodyFileFlag.handled && bodyFileFlag.value !== undefined) {
       flags.bodyFile = bodyFileFlag.value;
       index = bodyFileFlag.nextIndex;
+      continue;
+    }
+
+    const inlineCommentsFileFlag = parseStringFlagValue(args, index, {
+      long: "--inline-comments-file",
+      allowDashValue: true
+    });
+
+    if (inlineCommentsFileFlag.error !== undefined) {
+      return {
+        flags,
+        error: inlineCommentsFileFlag.error
+      };
+    }
+
+    if (inlineCommentsFileFlag.handled && inlineCommentsFileFlag.value !== undefined) {
+      flags.inlineCommentsFile = inlineCommentsFileFlag.value;
+      index = inlineCommentsFileFlag.nextIndex;
       continue;
     }
 
@@ -858,6 +890,96 @@ function parsePullRequestReviewFlags(args: string[]): { flags: ParsedPullRequest
   }
 
   return { flags };
+}
+
+/** @author S.Wienand */
+function renderInlineReviewCommentInputError(message: string): { error: CliResult } {
+  return {
+    error: {
+      exitCode: 1,
+      stdout: "",
+      stderr: `${message}\n`
+    }
+  };
+}
+
+/** @author S.Wienand */
+function resolveInlineReviewCommentInput(
+  inlineCommentsFile: string | undefined,
+  context: ResolvedCliExecutionContext
+): { comments?: InlineReviewCommentInput[]; error?: CliResult } {
+  if (inlineCommentsFile === undefined) {
+    return {};
+  }
+
+  let document: string;
+
+  if (inlineCommentsFile === "-") {
+    document = context.stdin;
+  } else {
+    try {
+      document = readFileSync(resolvePath(context.cwd, inlineCommentsFile), "utf8");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      return renderInlineReviewCommentInputError(
+        `Failed to read inline review comments from ${inlineCommentsFile}: ${message}`
+      );
+    }
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(document);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return renderInlineReviewCommentInputError(`Invalid inline review comments JSON: ${message}`);
+  }
+
+  if (!Array.isArray(payload) || payload.length === 0) {
+    return renderInlineReviewCommentInputError("Inline review comments must be a non-empty JSON array.");
+  }
+
+  const comments: InlineReviewCommentInput[] = [];
+
+  for (const [index, entry] of payload.entries()) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return renderInlineReviewCommentInputError(`Inline review comment ${index + 1} must be an object.`);
+    }
+
+    const candidate = entry as Record<string, unknown>;
+
+    if (typeof candidate.path !== "string") {
+      return renderInlineReviewCommentInputError(`Inline review comment ${index + 1} path must be a string.`);
+    }
+
+    if (typeof candidate.body !== "string" || candidate.body.trim().length === 0) {
+      return renderInlineReviewCommentInputError(
+        `Inline review comment ${index + 1} body must be a non-empty string.`
+      );
+    }
+
+    if (typeof candidate.line !== "number" || !Number.isInteger(candidate.line) || candidate.line <= 0) {
+      return renderInlineReviewCommentInputError(
+        `Inline review comment ${index + 1} line must be a positive integer.`
+      );
+    }
+
+    if (candidate.side !== "LEFT" && candidate.side !== "RIGHT") {
+      return renderInlineReviewCommentInputError(`Inline review comment ${index + 1} side must be LEFT or RIGHT.`);
+    }
+
+    comments.push({
+      path: candidate.path,
+      body: candidate.body,
+      line: candidate.line,
+      side: candidate.side
+    });
+  }
+
+  return { comments };
 }
 
 function parsePullRequestMergeFlags(args: string[]): { flags: ParsedPullRequestMergeFlags; error?: CliResult } {
@@ -1291,10 +1413,11 @@ async function commentOnPullRequest(
   }
 }
 
+/** @author S.Wienand */
 async function reviewPullRequest(
   repository: RepositoryContext,
   pullRequestNumber: number,
-  review: { event: PullRequestReviewEvent; body?: string },
+  review: { event: PullRequestReviewEvent; body?: string; comments?: InlineReviewCommentInput[] },
   context: ResolvedCliExecutionContext
 ): Promise<{ error?: CliResult }> {
   const tokenResult = resolveRequiredPullRequestToken(repository.hostname, context, "review");
@@ -1304,9 +1427,21 @@ async function reviewPullRequest(
   }
 
   const requestUrl = `${buildHostBaseUrl(repository.hostname)}/api/v1/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repository)}/pulls/${pullRequestNumber}/reviews`;
-  const requestBody = review.body === undefined
-    ? { event: review.event }
-    : { event: review.event, body: review.body };
+  const requestBody: {
+    event: PullRequestReviewEvent;
+    body?: string;
+    comments?: GiteaInlineReviewComment[];
+  } = {
+    event: review.event,
+    ...(review.body === undefined ? {} : { body: review.body }),
+    ...(review.comments === undefined
+      ? {}
+      : {
+          comments: review.comments.map((comment) => comment.side === "RIGHT"
+            ? { path: comment.path, body: comment.body, new_position: comment.line }
+            : { path: comment.path, body: comment.body, old_position: comment.line })
+        })
+  };
 
   try {
     const response = await fetch(requestUrl, {
@@ -2123,6 +2258,7 @@ function renderStructuredPullRequestOutput(
   };
 }
 
+/** @author S.Wienand */
 export async function executePrCommand(args: string[], context: ResolvedCliExecutionContext): Promise<CliResult | undefined> {
   if (
     args[0] !== "pr"
@@ -2270,10 +2406,27 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       return parsedReviewFlags.error;
     }
 
+    if (parsedReviewFlags.flags.bodyFile === "-" && parsedReviewFlags.flags.inlineCommentsFile === "-") {
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: "Specify standard input for only one of --body-file or --inline-comments-file.\n"
+      };
+    }
+
     const bodyInputResult = resolvePullRequestBodyInput(parsedReviewFlags.flags, context);
 
     if (bodyInputResult.error !== undefined) {
       return bodyInputResult.error;
+    }
+
+    const inlineCommentsResult = resolveInlineReviewCommentInput(
+      parsedReviewFlags.flags.inlineCommentsFile,
+      context
+    );
+
+    if (inlineCommentsResult.error !== undefined) {
+      return inlineCommentsResult.error;
     }
 
     if (parsedReviewFlags.flags.pullRequestNumber === undefined) {
@@ -2284,7 +2437,7 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       };
     }
 
-    if (parsedReviewFlags.flags.event === undefined) {
+    if (parsedReviewFlags.flags.event === undefined && inlineCommentsResult.comments === undefined) {
       return {
         exitCode: 1,
         stdout: "",
@@ -2306,8 +2459,9 @@ export async function executePrCommand(args: string[], context: ResolvedCliExecu
       repositoryResult.target.repository,
       parsedReviewFlags.flags.pullRequestNumber,
       {
-        event: parsedReviewFlags.flags.event,
-        ...(bodyInputResult.body === undefined ? {} : { body: bodyInputResult.body })
+        event: parsedReviewFlags.flags.event ?? "COMMENT",
+        ...(bodyInputResult.body === undefined ? {} : { body: bodyInputResult.body }),
+        ...(inlineCommentsResult.comments === undefined ? {} : { comments: inlineCommentsResult.comments })
       },
       context
     );
