@@ -2562,6 +2562,21 @@ test("pr create help classifies supported and unsupported write flags", async ()
   assert.match(result.stdout, /--web, -w[\s\S]*\[unsupported\]/i);
 });
 
+test("pr view help classifies --comments as supported", async () => {
+  const result = await executeCli(["pr", "view", "--help"]);
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /--comments[\s\S]*\[supported\]/i);
+});
+
+test("pr commands reject --comments outside pr view", async () => {
+  const result = await executeCli(["pr", "list", "--comments"]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "--comments is only supported with pr view.\n");
+});
+
 test("pr comment, review, and merge help classify the supported PR write slice", async () => {
   const commentHelp = await executeCli(["pr", "comment", "--help"]);
   const reviewHelp = await executeCli(["pr", "review", "--help"]);
@@ -2871,6 +2886,12 @@ test("issue view --comments surfaces authentication failures from the discussion
 
 test("pr view reads a single pull request from the selected Gitea host", async () => {
   const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments" || request.url === "/api/v1/repos/octo/project/pulls/42/reviews") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([]));
+      return;
+    }
+
     if (request.url !== "/api/v1/repos/octo/project/pulls/42") {
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({ message: "not found" }));
@@ -2906,6 +2927,300 @@ test("pr view reads a single pull request from the selected Gitea host", async (
     assert.match(result.stdout, /feature\/pr-read/);
     assert.match(result.stdout, /main/);
     assert.match(result.stdout, new RegExp(`http://127\\.0\\.0\\.1:${port}/octo/project/pulls/42`));
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr view previews the newest comment across regular and review discussions", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          number: 42,
+          title: "Ship the pull request discussion",
+          state: "open",
+          body: "Pull request body text.",
+          comments: 2,
+          base: { ref: "main" },
+          head: { ref: "feature/pr-comments" }
+        })
+      );
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 1,
+            body: "Regular discussion",
+            user: { id: 10, login: "commenter" },
+            created_at: "2026-06-01T10:00:00Z"
+          },
+          {
+            id: 2,
+            body: "Newest regular discussion",
+            user: { id: 11, login: "maintainer" },
+            created_at: "2026-06-01T10:30:00Z"
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls/42/reviews") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 70,
+            body: "Review summary",
+            user: { id: 12, login: "reviewer" },
+            submitted_at: "2026-06-01T10:15:00Z"
+          }
+        ])
+      );
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls/42/reviews/70/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify([
+          {
+            id: 71,
+            body: "Newest inline discussion",
+            user: { id: 12, login: "reviewer" },
+            created_at: "2026-06-01T10:45:00Z"
+          }
+        ])
+      );
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["pr", "view", "42", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Pull request body text\./);
+    assert.match(result.stdout, /Not showing 3 comments/);
+    assert.match(result.stdout, /reviewer.*Newest comment/i);
+    assert.match(result.stdout, /Newest inline discussion/);
+    assert.doesNotMatch(result.stdout, /Newest regular discussion/);
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr view --comments shows the full conversation in chronological order", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ number: 42, title: "Review discussion", state: "open" }));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([
+        { id: 1, body: "First regular comment", user: { login: "commenter" }, created_at: "2026-06-01T10:00:00Z" }
+      ]));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls/42/reviews") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([
+        { id: 70, body: "Second review comment", user: { login: "reviewer" }, submitted_at: "2026-06-01T10:15:00Z" }
+      ]));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls/42/reviews/70/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([
+        { id: 71, body: "Third inline comment", user: { login: "reviewer" }, created_at: "2026-06-01T10:30:00Z" }
+      ]));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--comments"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.doesNotMatch(result.stdout, /Not showing/);
+    assert.ok(result.stdout.indexOf("First regular comment") < result.stdout.indexOf("Second review comment"));
+    assert.ok(result.stdout.indexOf("Second review comment") < result.stdout.indexOf("Third inline comment"));
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr view paginates regular comments and reviews", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ number: 42, title: "Paginated discussion", state: "open" }));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(200, { "content-type": "application/json", "x-total-count": "2" });
+      response.end(JSON.stringify([
+        { id: 1, body: "First regular page", user: { login: "commenter" }, created_at: "2026-06-01T10:00:00Z" }
+      ]));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments?page=2") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([
+        { id: 2, body: "Second regular page", user: { login: "commenter" }, created_at: "2026-06-01T10:10:00Z" }
+      ]));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls/42/reviews") {
+      response.writeHead(200, { "content-type": "application/json", "x-total-count": "2" });
+      response.end(JSON.stringify([
+        { id: 70, body: "First review page", user: { login: "reviewer" }, submitted_at: "2026-06-01T10:20:00Z" }
+      ]));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls/42/reviews?page=2") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([
+        { id: 71, body: "Second review page", user: { login: "reviewer" }, submitted_at: "2026-06-01T10:30:00Z" }
+      ]));
+      return;
+    }
+
+    if (
+      request.url === "/api/v1/repos/octo/project/pulls/42/reviews/70/comments"
+      || request.url === "/api/v1/repos/octo/project/pulls/42/reviews/71/comments"
+    ) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([]));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--comments"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.stdout.indexOf("First regular page") < result.stdout.indexOf("Second regular page"));
+    assert.ok(result.stdout.indexOf("Second regular page") < result.stdout.indexOf("First review page"));
+    assert.ok(result.stdout.indexOf("First review page") < result.stdout.indexOf("Second review page"));
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr view indicates when a pull request has no comments", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ number: 42, title: "No discussion", state: "open", comments: 0 }));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments" || request.url === "/api/v1/repos/octo/project/pulls/42/reviews") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([]));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli(["pr", "view", "42", "-R", `127.0.0.1:${port}/octo/project`]);
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /No comments\./);
     assert.equal(result.stderr, "");
   } finally {
     await new Promise<void>((resolve, reject) =>
@@ -4239,6 +4554,96 @@ test("pr view supports manifest-backed json output fields", async () => {
       headRefName: "feature/pr-read",
       baseRefName: "main",
       url: `http://127.0.0.1:${port}/octo/project/pulls/42`
+    });
+    assert.equal(result.stderr, "");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      })
+    );
+  }
+});
+
+test("pr view exposes aggregated comments in structured output only when requested", async () => {
+  const server = createServer((request, response) => {
+    if (request.url === "/api/v1/repos/octo/project/pulls/42") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ number: 42, title: "Structured discussion", state: "open" }));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/issues/42/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([
+        {
+          id: 1,
+          body: "Regular JSON comment",
+          user: { id: 10, login: "commenter", full_name: "Commenter" },
+          created_at: "2026-06-01T10:00:00Z"
+        }
+      ]));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls/42/reviews") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([
+        { id: 70, body: "Review JSON comment", user: { login: "reviewer" }, submitted_at: "2026-06-01T10:15:00Z" }
+      ]));
+      return;
+    }
+
+    if (request.url === "/api/v1/repos/octo/project/pulls/42/reviews/70/comments") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify([]));
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "not found" }));
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = getServerPort(server);
+
+  try {
+    const result = await executeCli([
+      "pr",
+      "view",
+      "42",
+      "-R",
+      `127.0.0.1:${port}/octo/project`,
+      "--json",
+      "comments,commentCount"
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      comments: [
+        {
+          id: 1,
+          author: { id: 10, login: "commenter", name: "Commenter" },
+          body: "Regular JSON comment",
+          createdAt: "2026-06-01T10:00:00Z",
+          updatedAt: null,
+          url: null
+        },
+        {
+          id: 70,
+          author: { id: null, login: "reviewer", name: null },
+          body: "Review JSON comment",
+          createdAt: "2026-06-01T10:15:00Z",
+          updatedAt: null,
+          url: null
+        }
+      ],
+      commentCount: 2
     });
     assert.equal(result.stderr, "");
   } finally {
